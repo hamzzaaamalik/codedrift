@@ -7,7 +7,20 @@
 
 CodeDrift is a static analysis tool that detects critical security vulnerabilities, runtime bugs, and production failures that AI coding assistants silently introduce into your codebase. While ESLint catches syntax errors and TypeScript catches type mismatches, CodeDrift catches the dangerous semantic bugs that ship to production and cause outages.
 
-## Why CodeDrift is Mandatory (Not Nice-to-Have)
+## Why CodeDrift is Mandatory
+
+### The AI Coding Problem
+
+AI coding assistants (GitHub Copilot, Cursor, ChatGPT) are accelerating development—but they're also introducing a new class of bugs:
+
+- Production secrets leaked in error responses (stack traces with API keys visible to users)
+- Hallucinated dependencies that don't exist
+- Silent data corruption from missing `await` statements
+- Fire-and-forget async operations that never complete
+
+These issues bypass ESLint, TypeScript, and code review because they're syntactically correct but semantically dangerous.
+
+**CodeDrift is the guardrail that makes AI coding assistants safe for production use.**
 
 ### The Financial Reality
 
@@ -28,21 +41,6 @@ CodeDrift is a static analysis tool that detects critical security vulnerabiliti
 - **ISO 27001** - Security vulnerability detection
 
 **CodeDrift provides audit trail** via JSON reports for compliance verification.
-
-### The AI Coding Problem
-
-AI coding assistants (GitHub Copilot, Cursor, ChatGPT) are accelerating development—but they're also introducing a new class of bugs:
-
-- **77% of developers** use GitHub Copilot (GitHub 2024)
-- **30-60% of new code** is AI-generated
-- **~20% of AI-generated imports** are hallucinated packages that don't exist
-- **Production secrets leaked** in error responses (stack traces with API keys visible to users)
-- **Silent data corruption** from missing `await` statements
-- **Fire-and-forget async operations** that never complete
-
-These issues bypass ESLint, TypeScript, and code review because they're syntactically correct but semantically dangerous.
-
-**CodeDrift is the guardrail that makes AI coding assistants safe for production use.**
 
 ## Installation
 
