@@ -29,5 +29,8 @@ npm-debug.log*
 # Claude IDE
 .claude/
 
+# CodeDrift baseline
+.codedrift-baseline.json
+
 # OS
 Thumbs.db

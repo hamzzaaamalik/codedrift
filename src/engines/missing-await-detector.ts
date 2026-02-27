@@ -206,6 +206,10 @@ export class MissingAwaitDetector extends BaseEngine {
       'createIssue', 'loadPackageJson', 'extractPackageName', // engine helpers
       'checkMissingAwait', 'checkResponseCall', 'checkLoggerCall', // engine checks
       'containsStackTrace', 'containsSensitiveData', // detector helpers
+      'digest', 'update', 'createHash', // crypto methods
+      'log', 'warn', 'error', 'info', // console methods (backup)
+      'exit', 'cwd', // process methods
+      'substring', 'getDefaultBaselinePath', 'saveBaseline', 'loadBaseline', // baseline helpers
     ];
 
     return syncMethods.includes(methodName);

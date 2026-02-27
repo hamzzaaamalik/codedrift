@@ -1,6 +1,6 @@
 {
   "name": "codedrift",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "AI refactoring guardrail - Detects stack trace leaks, hallucinated dependencies, missing awaits, hardcoded secrets & AI anti-patterns",
   "type": "module",
   "main": "dist/cli.js",
@@ -15,12 +15,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yourusername/codedrift.git"
+    "url": "git+https://github.com/hamzzaaamalik/codedrift.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/codedrift/issues"
+    "url": "https://github.com/hamzzaaamalik/codedrift/issues"
   },
-  "homepage": "https://github.com/yourusername/codedrift#readme",
+  "homepage": "https://github.com/hamzzaaamalik/codedrift#readme",
   "keywords": [
     "ai",
     "static-analysis",

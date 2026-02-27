@@ -48,6 +48,8 @@ export interface AnalysisResult {
     cached: number;
     total: number;
   };
+  startTime?: number;
+  endTime?: number;
 }
 
 export interface CacheEntry {
@@ -58,6 +60,8 @@ export interface CacheEntry {
 }
 
 export type RuleLevel = 'error' | 'warn' | 'off';
+
+export type OutputFormat = 'terminal' | 'json' | 'html';
 
 export interface CodeDriftConfig {
   // File patterns to exclude from analysis
@@ -79,5 +83,37 @@ export interface CodeDriftConfig {
   cache?: {
     enabled?: boolean;
     ttl?: number;
+  };
+
+  // Output options
+  format?: OutputFormat;
+  output?: string;
+}
+
+export interface JSONReport {
+  summary: {
+    totalFiles: number;
+    analyzedFiles: number;
+    totalIssues: number;
+    criticalIssues: number;
+    warnings: number;
+    timestamp: string;
+    duration: number;
+  };
+  issues: Array<{
+    engine: string;
+    severity: Severity;
+    message: string;
+    filePath: string;
+    location: {
+      line: number;
+      column: number;
+    };
+    suggestion?: string;
+    ruleId: string;
+  }>;
+  config: {
+    failOn: string;
+    rulesEnabled: string[];
   };
 }
