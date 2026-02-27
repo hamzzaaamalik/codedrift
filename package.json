@@ -1,0 +1,63 @@
+{
+  "name": "codedrift",
+  "version": "1.0.0",
+  "description": "AI refactoring guardrail - Detects stack trace leaks, hallucinated dependencies, missing awaits, hardcoded secrets & AI anti-patterns",
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "codedrift": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/codedrift.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/codedrift/issues"
+  },
+  "homepage": "https://github.com/yourusername/codedrift#readme",
+  "keywords": [
+    "ai",
+    "static-analysis",
+    "linter",
+    "security",
+    "typescript",
+    "javascript",
+    "copilot",
+    "code-quality",
+    "async-await",
+    "secrets-detection",
+    "stack-trace",
+    "eslint-plugin",
+    "ai-safety"
+  ],
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "codedrift.config.example.json"
+  ],
+  "author": "CodeDrift Contributors",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.3.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3",
+    "glob": "^13.0.6",
+    "ora": "^9.3.0",
+    "simple-git": "^3.32.3"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "exclude": [
+    "node_modules/**",
+    "dist/**",
+    "build/**",
+    "coverage/**",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "__tests__/**"
+  ],
+  "rules": {
+    "stack-trace-exposure": "error",
+    "hallucinated-deps": "error",
+    "missing-await": "warn",
+    "empty-catch": "warn",
+    "hardcoded-secret": "error"
+  },
+  "failOn": "error"
+}
