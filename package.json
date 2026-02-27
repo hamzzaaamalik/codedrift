@@ -1,6 +1,6 @@
 {
   "name": "codedrift",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "AI refactoring guardrail - Detects stack trace leaks, hallucinated dependencies, missing awaits, hardcoded secrets & AI anti-patterns",
   "type": "module",
   "main": "dist/cli.js",
