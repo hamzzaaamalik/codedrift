@@ -32,5 +32,11 @@ npm-debug.log*
 # CodeDrift baseline
 .codedrift-baseline.json
 
+# CodeDrift reports (generated files - don't commit)
+codedrift-report.html
+test-report.html
+*-report.html
+*.codedrift.json
+
 # OS
 Thumbs.db

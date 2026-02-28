@@ -9,48 +9,183 @@ export function formatTerminal(result: AnalysisResult, _config: CodeDriftConfig)
   const { issues, stats } = result;
 
   const criticalIssues = issues.filter(i => i.severity === 'error');
-  const highIssues = issues.filter(i => i.severity === 'warning');
+  const warnings = issues.filter(i => i.severity === 'warning');
 
-  let output = '\n' + chalk.bold('CodeDrift Analysis Complete\n');
+  let output = '\n' + chalk.bold.cyan('═'.repeat(60)) + '\n';
+  output += chalk.bold('  CodeDrift Analysis Complete\n');
+  output += chalk.bold.cyan('═'.repeat(60)) + '\n';
 
-  if (criticalIssues.length > 0) {
-    output += '\n' + chalk.red.bold(`CRITICAL Issues (${criticalIssues.length}) - Blocking\n`);
-    criticalIssues.forEach(issue => {
-      output += '\n' + formatIssue(issue);
-    });
-  }
+  // Group issues by engine
+  const issuesByEngine = groupIssuesByEngine(issues);
 
-  if (highIssues.length > 0) {
-    output += '\n' + chalk.yellow.bold(`\nWARNINGS (${highIssues.length})\n`);
-    highIssues.forEach(issue => {
-      output += '\n' + formatIssue(issue);
-    });
-  }
+  // Summary section
+  output += '\n' + chalk.bold('📊 Summary\n');
+  output += chalk.gray('─'.repeat(60)) + '\n';
 
   if (issues.length === 0) {
-    output += '\n' + chalk.green.bold('✓ No issues found!\n');
+    output += '\n' + chalk.green.bold('  ✓ No issues found! Your code looks clean.\n');
+  } else {
+    // Show grouped summary
+    const sortedEngines = Object.entries(issuesByEngine)
+      .sort((a, b) => {
+        // Sort by: critical count desc, then total count desc
+        const aCritical = a[1].filter(i => i.severity === 'error').length;
+        const bCritical = b[1].filter(i => i.severity === 'error').length;
+        if (aCritical !== bCritical) return bCritical - aCritical;
+        return b[1].length - a[1].length;
+      });
+
+    for (const [engine, engineIssues] of sortedEngines) {
+      const engineCritical = engineIssues.filter(i => i.severity === 'error').length;
+      const engineWarnings = engineIssues.filter(i => i.severity === 'warning').length;
+      const filePaths = new Set<string>();
+      for (const issue of engineIssues) {
+        filePaths.add(issue.filePath);
+      }
+      const fileCount = filePaths.size;
+
+      const icon = engineCritical > 0 ? '🔴' : '⚠️ ';
+      const severityText = engineCritical > 0
+        ? chalk.red(`${engineCritical} critical`)
+        : chalk.yellow(`${engineWarnings} warnings`);
+
+      output += `\n  ${icon} ${chalk.bold(getRuleName(engine))}: ${severityText}`;
+      output += chalk.gray(` across ${fileCount} file${fileCount > 1 ? 's' : ''}`);
+    }
   }
 
-  output += '\n' + chalk.bold('Stats\n');
-  output += `  • Analyzed: ${stats.analyzed} files\n`;
-  output += `  • Total: ${stats.total} files\n`;
+  // Critical issues - show top 10 most dangerous
+  if (criticalIssues.length > 0) {
+    output += '\n\n' + chalk.red.bold(`🚨 CRITICAL Issues (${criticalIssues.length}) - Must Fix\n`);
+    output += chalk.gray('─'.repeat(60)) + '\n';
+
+    // Prioritize: IDOR, input validation, secrets, then others
+    const prioritized = prioritizeIssues(criticalIssues);
+    const toShow = prioritized.slice(0, 10);
+
+    toShow.forEach((issue, index) => {
+      output += '\n' + formatIssueSummary(issue, index + 1);
+    });
+
+    if (criticalIssues.length > 10) {
+      const remaining = criticalIssues.length - 10;
+      output += '\n' + chalk.gray(`  ... and ${remaining} more critical issue${remaining > 1 ? 's' : ''}\n`);
+      output += chalk.gray(`  Run with --format json to see all issues\n`);
+    }
+  }
+
+  // Warnings - show summary only
+  if (warnings.length > 0) {
+    output += '\n\n' + chalk.yellow.bold(`⚠️  Warnings (${warnings.length})\n`);
+    output += chalk.gray('─'.repeat(60)) + '\n';
+
+    const warningsByEngine = groupIssuesByEngine(warnings);
+    for (const [engine, engineIssues] of Object.entries(warningsByEngine)) {
+      const filePaths = new Set<string>();
+      for (const issue of engineIssues) {
+        filePaths.add(issue.filePath);
+      }
+      const fileCount = filePaths.size;
+      output += `\n  • ${chalk.bold(getRuleName(engine))}: ${engineIssues.length} finding${engineIssues.length > 1 ? 's' : ''} in ${fileCount} file${fileCount > 1 ? 's' : ''}`;
+    }
+
+    output += '\n\n' + chalk.gray(`  Run with --format json to see all warnings\n`);
+  }
+
+  // Stats section
+  output += '\n\n' + chalk.bold('📈 Stats\n');
+  output += chalk.gray('─'.repeat(60)) + '\n';
+  output += `  Files analyzed: ${chalk.cyan(stats.analyzed.toString())} / ${stats.total}\n`;
 
   if (result.startTime && result.endTime) {
     const duration = result.endTime - result.startTime;
-    output += `  • Duration: ${duration}ms\n`;
+    const speed = (stats.analyzed / (duration / 1000)).toFixed(0);
+    output += `  Duration: ${chalk.cyan(duration + 'ms')} (${speed} files/sec)\n`;
   }
+
+  // Final verdict
+  output += '\n' + chalk.bold.cyan('═'.repeat(60)) + '\n';
+  if (criticalIssues.length > 0) {
+    output += chalk.red.bold('❌ Fix critical issues before deploying to production\n');
+  } else if (warnings.length > 0) {
+    output += chalk.yellow.bold('⚠️  Consider fixing warnings to improve code quality\n');
+  } else {
+    output += chalk.green.bold('✅ All checks passed!\n');
+  }
+  output += chalk.bold.cyan('═'.repeat(60)) + '\n';
 
   return output;
 }
 
-function formatIssue(issue: Issue): string {
+/**
+ * Group issues by detection engine
+ */
+function groupIssuesByEngine(issues: Issue[]): Record<string, Issue[]> {
+  const grouped: Record<string, Issue[]> = {};
+  for (const issue of issues) {
+    if (!grouped[issue.engine]) {
+      grouped[issue.engine] = [];
+    }
+    grouped[issue.engine].push(issue);
+  }
+  return grouped;
+}
+
+/**
+ * Prioritize issues by danger level
+ */
+function prioritizeIssues(issues: Issue[]): Issue[] {
+  const priority = {
+    'idor': 1,                          // Data breach risk
+    'missing-input-validation': 2,      // Injection risk
+    'hardcoded-secret': 3,              // Credential exposure
+    'stack-trace-exposure': 4,          // Information disclosure
+    'missing-await': 5,                 // Data corruption
+    'async-foreach': 6,                 // Race conditions
+    'hallucinated-deps': 7,             // Runtime crash
+    'unsafe-regex': 8,                  // DoS risk
+    'console-in-production': 9,         // Data leakage
+    'empty-catch': 10,                  // Silent failures
+  };
+
+  return [...issues].sort((a, b) => {
+    const aPriority = priority[a.engine as keyof typeof priority] || 99;
+    const bPriority = priority[b.engine as keyof typeof priority] || 99;
+    return aPriority - bPriority;
+  });
+}
+
+/**
+ * Get human-readable rule name
+ */
+function getRuleName(engine: string): string {
+  const names: Record<string, string> = {
+    'idor': 'Insecure Direct Object Reference',
+    'missing-input-validation': 'Missing Input Validation',
+    'hardcoded-secret': 'Hardcoded Secrets',
+    'stack-trace-exposure': 'Stack Trace Exposure',
+    'missing-await': 'Missing Await',
+    'async-foreach': 'Async forEach/map',
+    'hallucinated-deps': 'Hallucinated Dependencies',
+    'unsafe-regex': 'Unsafe Regex (ReDoS)',
+    'console-in-production': 'Console in Production',
+    'empty-catch': 'Empty Catch Blocks',
+  };
+  return names[engine] || engine;
+}
+
+/**
+ * Format a single issue in condensed format
+ */
+function formatIssueSummary(issue: Issue, index: number): string {
   let output = '';
 
-  output += chalk.cyan(`  ${issue.filePath}:${issue.location.line}\n`);
-  output += `  ${issue.message}\n`;
+  const fileLocation = `${issue.filePath}:${issue.location.line}`;
+  output += `  ${chalk.bold(index + '.')} ${chalk.cyan(fileLocation)}\n`;
+  output += `     ${issue.message}\n`;
 
   if (issue.suggestion) {
-    output += chalk.gray(`  → ${issue.suggestion}\n`);
+    output += `     ${chalk.gray('→ ' + issue.suggestion)}\n`;
   }
 
   return output;

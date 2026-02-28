@@ -337,11 +337,15 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
     <div class="container">
         <header>
             <div class="header-left">
-                <h1>CodeDrift Security Report</h1>
+                <h1>🛡️ CodeDrift Security Report</h1>
                 <p class="subtitle">AI Code Safety Analysis</p>
             </div>
             <div class="header-right">
                 <p class="timestamp">Generated: ${new Date().toLocaleString()}</p>
+                ${criticalIssues.length > 0
+                    ? '<p style="color: #dc2626; font-weight: 600; font-size: 14px; margin-top: 4px;">⚠️ Critical Issues Found</p>'
+                    : '<p style="color: #10b981; font-weight: 600; font-size: 14px; margin-top: 4px;">✓ All Clear</p>'
+                }
             </div>
         </header>
 
@@ -488,14 +492,38 @@ function renderIssuesByFile(issuesByFile: Map<string, Issue[]>): string {
 }
 
 function renderIssuesByEngine(issuesByEngine: Map<string, Issue[]>): string {
-  const entries = Array.from(issuesByEngine.entries()).sort((a, b) => b[1].length - a[1].length);
+  // Prioritize by danger level, not just count
+  const priority: Record<string, number> = {
+    'idor': 1,
+    'missing-input-validation': 2,
+    'hardcoded-secret': 3,
+    'stack-trace-exposure': 4,
+    'missing-await': 5,
+    'async-foreach': 6,
+    'hallucinated-deps': 7,
+    'unsafe-regex': 8,
+    'console-in-production': 9,
+    'empty-catch': 10,
+  };
+
+  const entries = Array.from(issuesByEngine.entries()).sort((a, b) => {
+    const aPriority = priority[a[0]] || 99;
+    const bPriority = priority[b[0]] || 99;
+    if (aPriority !== bPriority) return aPriority - bPriority;
+    return b[1].length - a[1].length; // If same priority, sort by count
+  });
 
   const engineNames: Record<string, string> = {
-    'stack-trace-exposure': 'Stack Trace Exposure',
-    'hallucinated-deps': 'Hallucinated Dependencies',
-    'missing-await': 'Missing Await',
-    'empty-catch': 'Empty Catch Blocks',
+    'idor': 'Insecure Direct Object Reference',
+    'missing-input-validation': 'Missing Input Validation',
     'hardcoded-secret': 'Hardcoded Secrets',
+    'stack-trace-exposure': 'Stack Trace Exposure',
+    'missing-await': 'Missing Await',
+    'async-foreach': 'Async forEach/map',
+    'hallucinated-deps': 'Hallucinated Dependencies',
+    'unsafe-regex': 'Unsafe Regular Expressions (ReDoS)',
+    'console-in-production': 'Console in Production',
+    'empty-catch': 'Empty Catch Blocks',
   };
 
   return entries.map(([engine, issues]) => `

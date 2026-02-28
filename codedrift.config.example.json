@@ -6,14 +6,23 @@
     "coverage/**",
     "**/*.test.ts",
     "**/*.spec.ts",
-    "__tests__/**"
+    "**/*.test.js",
+    "**/*.spec.js",
+    "__tests__/**",
+    "test/**",
+    "tests/**"
   ],
   "rules": {
     "stack-trace-exposure": "error",
     "hallucinated-deps": "error",
-    "missing-await": "warn",
+    "missing-await": "error",
+    "async-foreach": "error",
     "empty-catch": "warn",
-    "hardcoded-secret": "error"
+    "hardcoded-secret": "error",
+    "unsafe-regex": "error",
+    "console-in-production": "warn",
+    "missing-input-validation": "error",
+    "idor": "error"
   },
   "failOn": "error"
 }

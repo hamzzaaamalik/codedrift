@@ -22,12 +22,6 @@ export class MissingAwaitDetector extends BaseEngine {
         if (issue) {
           issues.push(issue);
         }
-
-        // Check forEach with async callbacks (common mistake!)
-        const forEachIssue = this.checkForEachWithAsync(node, context);
-        if (forEachIssue) {
-          issues.push(forEachIssue);
-        }
       }
     });
 
@@ -151,6 +145,11 @@ export class MissingAwaitDetector extends BaseEngine {
       return false;
     }
 
+    // Skip intentional fire-and-forget patterns (logging, analytics, monitoring)
+    if (this.isIntentionalFireAndForget(functionName, objectName)) {
+      return false;
+    }
+
     // Skip common synchronous methods
     if (this.isSyncMethod(functionName, objectName)) {
       return false;
@@ -169,12 +168,71 @@ export class MissingAwaitDetector extends BaseEngine {
 
     // Heuristic: Common async naming patterns (but only for standalone functions)
     if (!objectName) {
+      // Skip obvious synchronous getter utilities
+      const syncGetterPatterns = [
+        /^get\w+(Name|Type|Value|Label|Text|Key|Id|Index|Count|Length|Size)$/i,
+      ];
+
+      if (syncGetterPatterns.some(pattern => pattern.test(functionName))) {
+        return false;
+      }
+
       const asyncPatterns = [
         /^(get|fetch|load|save|update|create|delete|send|process|execute|run|handle)/i,
         /^(notify|track|record|write|read|query|insert)/i,
       ];
 
       return asyncPatterns.some(pattern => pattern.test(functionName));
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if this is an intentional fire-and-forget async call
+   * (logging, analytics, background tasks that don't affect main flow)
+   */
+  private isIntentionalFireAndForget(methodName: string, objectName: string | null): boolean {
+    // Common fire-and-forget function patterns
+    const fireAndForgetPatterns = [
+      // Logging/Analytics
+      'log', 'logActivity', 'logEvent', 'logError', 'logWarning', 'logInfo',
+      'track', 'trackEvent', 'trackUser', 'trackAction', 'trackPageView',
+      'record', 'recordMetric', 'recordEvent', 'recordActivity',
+      'report', 'reportError', 'reportEvent',
+      'analytics', 'sendAnalytics',
+
+      // Event emitters (async but intentionally not awaited)
+      'emit', 'publish', 'dispatch', 'trigger', 'fire',
+
+      // Background monitoring
+      'monitor', 'ping', 'heartbeat', 'healthCheck',
+
+      // Cache warming (fire-and-forget)
+      'warmCache', 'prefetch', 'preload',
+
+      // Notifications (often fire-and-forget)
+      'notify', 'sendNotification', 'alert',
+    ];
+
+    if (fireAndForgetPatterns.includes(methodName)) {
+      return true;
+    }
+
+    // Event emitter objects
+    if (objectName) {
+      const eventEmitterObjects = ['emitter', 'eventBus', 'eventEmitter', 'events', 'bus'];
+      if (eventEmitterObjects.some(obj => objectName.toLowerCase().includes(obj))) {
+        return true;
+      }
+    }
+
+    // Logger objects
+    if (objectName) {
+      const loggerObjects = ['logger', 'log', 'analytics', 'tracker', 'telemetry', 'metrics'];
+      if (loggerObjects.some(obj => objectName.toLowerCase().includes(obj))) {
+        return true;
+      }
     }
 
     return false;
@@ -192,6 +250,11 @@ export class MissingAwaitDetector extends BaseEngine {
     // Chalk/Ora methods (terminal formatting)
     const formattingObjects = ['chalk', 'ora'];
     if (objectName && formattingObjects.includes(objectName)) {
+      return true;
+    }
+
+    // Chalk chaining (chalk.bold, chalk.red.bold, etc) - check if object name contains chalk
+    if (objectName && objectName.includes('chalk')) {
       return true;
     }
 
@@ -253,44 +316,4 @@ export class MissingAwaitDetector extends BaseEngine {
     return isAsync;
   }
 
-  /**
-   * Check if forEach/map/filter is called with async callback
-   * This is a common mistake - these methods don't await!
-   */
-  private checkForEachWithAsync(node: ts.CallExpression, context: AnalysisContext): Issue | null {
-    const { expression } = node;
-
-    // Check if it's a method call
-    if (!ts.isPropertyAccessExpression(expression)) {
-      return null;
-    }
-
-    const methodName = expression.name.text;
-
-    // Only check forEach, map, filter (they don't await callbacks)
-    const arrayMethods = ['forEach', 'map', 'filter'];
-    if (!arrayMethods.includes(methodName)) {
-      return null;
-    }
-
-    // Check if callback is async
-    if (node.arguments.length === 0) {
-      return null;
-    }
-
-    const callback = node.arguments[0];
-
-    // Check if callback is an async function
-    if (ASTHelpers.isFunctionLike(callback) && ASTHelpers.isAsyncFunction(callback)) {
-      return this.createIssue(context, node,
-        `${methodName}() with async callback doesn't await - use for...of or Promise.all()`,
-        {
-          severity: 'error',
-          suggestion: `Replace ${methodName}() with for...of loop or await Promise.all(array.map(...))`,
-        }
-      );
-    }
-
-    return null;
-  }
 }

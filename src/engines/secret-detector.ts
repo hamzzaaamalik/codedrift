@@ -288,6 +288,39 @@ export class SecretDetector extends BaseEngine {
    */
   private isSuspiciousVariableName(name: string): boolean {
     const lowerName = name.toLowerCase();
+
+    // Known false positives - these are NOT secrets
+    const falsePositivePatterns = [
+      'storage_key',      // localStorage/sessionStorage identifiers
+      'cache_key',        // Cache identifiers
+      'cookie_key',       // Cookie names
+      'local_storage',    // localStorage references
+      'session_storage',  // sessionStorage references
+      'query_key',        // React Query keys
+      'mutation_key',     // React Query mutation keys
+      'redis_key',        // Redis key names (not values)
+      'key_name',         // Generic key name identifiers
+      'key_path',         // Object path keys
+      'sort_key',         // Sorting keys
+      'partition_key',    // Database partition keys
+      'primary_key',      // Database primary keys
+      'foreign_key',      // Database foreign keys
+      'unique_key',       // Database unique keys
+      'index_key',        // Database index keys
+      'encryption_key_id', // Key identifier, not the key itself
+      'public_key',       // Public keys are not secrets
+      'key_id',           // Key identifier references
+      'key_type',         // Key type identifiers
+      'auth_token_name',  // Token field names, not actual tokens
+      'token_type',       // Token type identifiers
+      'token_field',      // Form field names
+    ];
+
+    // If it matches a known false positive pattern, it's not suspicious
+    if (falsePositivePatterns.some(pattern => lowerName.includes(pattern))) {
+      return false;
+    }
+
     const suspiciousWords = [
       'secret', 'password', 'passwd', 'pwd', 'token', 'key',
       'apikey', 'api_key', 'private', 'credential', 'auth',

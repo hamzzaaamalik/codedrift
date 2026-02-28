@@ -106,21 +106,6 @@ describe('StackTraceDetector', () => {
 describe('MissingAwaitDetector', () => {
   const engine = new MissingAwaitDetector();
 
-  test('should detect forEach with async callback', async () => {
-    const code = `
-      async function process(items) {
-        items.forEach(async (item) => {
-          await processItem(item);
-        });
-      }
-    `;
-    const context = createContext(code);
-    const issues = await engine.analyze(context);
-
-    assert.ok(issues.length > 0, 'Should detect forEach with async callback');
-    assert.ok(issues[0]?.message.includes('forEach'), 'Should mention forEach');
-  });
-
   test('should detect missing await on async function', async () => {
     const code = `
       async function fetchData() { return {}; }

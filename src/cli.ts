@@ -4,12 +4,13 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs';
+import * as readline from 'readline/promises';
 import { analyzeProject } from './core/analyzer.js';
 import { loadConfig } from './core/config.js';
 import { formatTerminal, formatJSON } from './core/formatter.js';
 import { generateHTMLReport } from './core/html-report.js';
 import { loadBaseline, saveBaseline, filterNewIssues, getDefaultBaselinePath } from './core/baseline.js';
-import type { OutputFormat } from './types/index.js';
+import type { OutputFormat, AnalysisResult, CodeDriftConfig } from './types/index.js';
 
 const program = new Command();
 
@@ -120,6 +121,11 @@ program
         }
       } else {
         console.log(outputContent);
+
+        // Interactive: Ask if user wants HTML report (only in terminal mode with issues)
+        if (finalFormat === 'terminal' && issuesToReport.length > 0) {
+          await promptForHTMLReport(reportResult, config);
+        }
       }
 
       // Determine exit code based on filtered issues
@@ -150,5 +156,35 @@ program
       process.exit(1);
     }
   });
+
+/**
+ * Prompt user if they want to generate an HTML report
+ */
+async function promptForHTMLReport(result: AnalysisResult, config: CodeDriftConfig): Promise<void> {
+  try {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    console.log(''); // Add spacing
+    const answer = await rl.question(chalk.cyan('📄 Generate HTML report? (y/n): '));
+    rl.close();
+
+    if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
+      const defaultFilename = 'codedrift-report.html';
+      const filename = defaultFilename;
+
+      const htmlContent = generateHTMLReport(result, config);
+      fs.writeFileSync(filename, htmlContent, 'utf-8');
+
+      console.log(chalk.green(`✓ HTML report saved to ${filename}`));
+      console.log(chalk.gray(`  Open it in your browser to see the full report`));
+    }
+  } catch (error) {
+    // User cancelled or error - just continue
+    console.log(''); // Add spacing
+  }
+}
 
 program.parse();
