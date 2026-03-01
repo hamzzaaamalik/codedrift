@@ -1205,7 +1205,7 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
         <footer>
             <div class="enhanced-footer">
                 <div>
-                    <p><strong>CodeDrift v1.2.0</strong> - AI Code Safety Guardian</p>
+                    <p><strong>CodeDrift v1.2.1</strong> - AI Code Safety Guardian</p>
                     <p style="margin-top: 4px;">
                         <a href="https://github.com/hamzzaaamalik/codedrift" target="_blank">github.com/hamzzaaamalik/codedrift</a>
                     </p>

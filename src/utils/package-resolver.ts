@@ -169,36 +169,45 @@ export class PackageResolver implements IPackageResolver {
       return true;
     }
 
-    // Strategy 2: Check nearest package.json to the file (for regular projects)
-    // This handles cases where the project imports itself (e.g., openclaw importing openclaw)
-    const nearestPkg = this.findNearestPackageJson(filePath);
-    if (nearestPkg) {
-      try {
-        let pkgJson: PackageJson;
-        if (this.packageJsonCache.has(nearestPkg)) {
-          pkgJson = this.packageJsonCache.get(nearestPkg)!;
-        } else {
-          pkgJson = this.loadPackageJson(nearestPkg);
-          this.packageJsonCache.set(nearestPkg, pkgJson);
-        }
+    // Strategy 2: Walk UP the directory tree checking ALL package.json files
+    // This handles monorepos where extensions/*/package.json import root package
+    // Example: extensions/tlon/src/file.ts imports "openclaw" (root package name)
+    let searchDir = path.dirname(filePath);
+    const projectRoot = path.dirname(this.packageJsonPath);
 
-        // If the nearest package.json has the same name as the import, it's a self-import
-        if (pkgJson.name === name) {
-          if (process.env.CODEDRIFT_DEBUG) {
-            console.log(`[PackageResolver] ✅ Self-import detected: ${name} matches package.json name "${pkgJson.name}"`);
+    while (searchDir.startsWith(projectRoot) || searchDir === projectRoot) {
+      const pkgPath = path.join(searchDir, 'package.json');
+
+      if (fs.existsSync(pkgPath)) {
+        try {
+          let pkgJson: PackageJson;
+          if (this.packageJsonCache.has(pkgPath)) {
+            pkgJson = this.packageJsonCache.get(pkgPath)!;
+          } else {
+            pkgJson = this.loadPackageJson(pkgPath);
+            this.packageJsonCache.set(pkgPath, pkgJson);
           }
-          return true;
-        }
-      } catch (error) {
-        // Ignore errors loading package.json
-      }
-    }
 
-    // Debug logging for workspace resolution
-    if (process.env.CODEDRIFT_DEBUG) {
-      console.log(`[PackageResolver] Checking ${name} for file ${filePath}`);
-      console.log(`[PackageResolver] File workspace: ${fileWorkspace || 'none'}`);
-      console.log(`[PackageResolver] Nearest pkg: ${nearestPkg}`);
+          // If ANY package.json in the tree has the same name as the import, it's a self-import
+          if (pkgJson.name === name) {
+            if (process.env.CODEDRIFT_DEBUG) {
+              console.log(`\n[PackageResolver] ✅ SELF-IMPORT DETECTED!`);
+              console.log(`[PackageResolver] Import "${name}" matches package.json at ${pkgPath}`);
+              console.log(`[PackageResolver] Package name: "${pkgJson.name}"\n`);
+            }
+            return true;
+          }
+        } catch (error) {
+          // Ignore errors loading package.json
+        }
+      }
+
+      // Move up one directory
+      const parentDir = path.dirname(searchDir);
+      if (parentDir === searchDir) {
+        break; // Reached filesystem root
+      }
+      searchDir = parentDir;
     }
 
     // Check if it's a workspace package (global workspace check)
