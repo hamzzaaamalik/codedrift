@@ -7,6 +7,7 @@
 import { BaseEngine } from './base-engine.js';
 import { AnalysisContext, Issue } from '../types/index.js';
 import { traverse } from '../core/parser.js';
+import { isMigrationFile } from '../utils/file-utils.js';
 import * as ts from 'typescript';
 
 export class EmptyCatchDetector extends BaseEngine {
@@ -46,12 +47,18 @@ export class EmptyCatchDetector extends BaseEngine {
 
     const { block } = catchClause;
 
+    // Context-aware: Empty catch is common and acceptable in migration/seed files
+    // for rollback scenarios
+    const inMigration = isMigrationFile(context.filePath);
+
     // Completely empty block
     if (block.statements.length === 0) {
       return this.createIssue(context, catchClause, 'Empty catch block silently swallows errors', {
-        severity: 'error',
-        suggestion: 'Log error, re-throw, or handle appropriately',
-        confidence: 'high',
+        severity: inMigration ? 'info' : 'error', // Downgrade for migrations
+        suggestion: inMigration
+          ? 'Consider logging migration rollback errors for debugging'
+          : 'Log error, re-throw, or handle appropriately',
+        confidence: inMigration ? 'low' : 'high', // Downgrade confidence for migrations
       });
     }
 
@@ -83,20 +90,25 @@ export class EmptyCatchDetector extends BaseEngine {
     }
 
     // Check if only console.log (not production-ready)
-    if (this.hasOnlyConsoleLog(block)) {
-      return this.createIssue(context, catchClause, 'Catch block only uses console.log - not production-ready', {
-        severity: 'warning',
-        suggestion: 'Use proper logger and error handling',
-        confidence: 'medium',
-      });
-    }
+    // NOTE: This check must come AFTER errorNotUsed to avoid duplicate reporting
+    // A catch block with console.log but unused error would match both conditions
+    const hasConsoleOnly = this.hasOnlyConsoleLog(block);
+    const errorUnused = this.errorNotUsed(catchClause);
 
-    // Check if error is never used
-    if (this.errorNotUsed(catchClause)) {
+    // Prioritize the more specific issue: unused error
+    if (errorUnused) {
       return this.createIssue(context, catchClause, 'Error caught but never used or logged', {
         severity: 'warning',
         suggestion: 'Use error variable in logging or handling',
         confidence: 'high',
+      });
+    }
+
+    if (hasConsoleOnly) {
+      return this.createIssue(context, catchClause, 'Catch block only uses console.log - not production-ready', {
+        severity: 'warning',
+        suggestion: 'Use proper logger and error handling',
+        confidence: 'medium',
       });
     }
 

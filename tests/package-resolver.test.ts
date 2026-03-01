@@ -26,10 +26,14 @@ describe('PackageResolver', () => {
     }
   });
 
-  test('should throw error if package.json does not exist', () => {
-    assert.throws(() => {
-      new PackageResolver(TEST_DIR);
-    }, /No package.json found/);
+  test('should find package.json in parent directory', () => {
+    // Since PackageResolver now walks up the directory tree,
+    // it will find the project's package.json even in an empty test dir
+    const resolver = new PackageResolver(TEST_DIR);
+    assert.ok(resolver);
+    assert.ok(resolver.packageJson);
+    // Should find the codedrift package.json in the project root
+    assert.strictEqual(resolver.packageJson.name, 'codedrift');
   });
 
   test('should load package.json successfully', () => {
@@ -311,8 +315,8 @@ describe('PackageResolver - Caching Behavior', () => {
       JSON.stringify(packageJson, null, 2)
     );
 
-    const resolver1 = createPackageResolver(TEST_DIR);
-    const resolver2 = createPackageResolver(TEST_DIR);
+    const resolver1 = new PackageResolver(TEST_DIR);
+    const resolver2 = new PackageResolver(TEST_DIR);
 
     assert.ok(resolver1 !== null);
     assert.ok(resolver2 !== null);

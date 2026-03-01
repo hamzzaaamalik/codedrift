@@ -22,11 +22,18 @@ const DEFAULT_CONFIG: CodeDriftConfig = {
     '**/__mocks__/**',
   ],
   rules: {
+    // Security issues - keep as errors (high priority)
     'stack-trace-exposure': 'error',
-    'hallucinated-deps': 'error',
-    'missing-await': 'error',
-    'empty-catch': 'warn',
     'hardcoded-secret': 'error',
+    'sql-injection': 'error',
+    'xss-detector': 'error',
+    'idor': 'error',
+
+    // Code quality - downgrade to warnings to reduce noise
+    'missing-await': 'warn', // ✅ CHANGED: Too noisy as error
+    'empty-catch': 'warn',
+    'console-in-production': 'warn', // ✅ CHANGED: Common in CLI tools
+    'hallucinated-deps': 'warn', // ✅ CHANGED: Workspace resolution can be complex
   },
   failOn: 'error',
   cache: {
@@ -34,8 +41,8 @@ const DEFAULT_CONFIG: CodeDriftConfig = {
     ttl: 86400000, // 24 hours
   },
   respectGitignore: true,
-  excludeTestFiles: false,
-  confidenceThreshold: 'low', // Include all issues by default
+  excludeTestFiles: true, // ✅ CHANGED: Skip test files by default to reduce noise
+  confidenceThreshold: 'medium', // ✅ CHANGED: Skip low-confidence noise by default
 };
 
 /**

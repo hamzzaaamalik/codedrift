@@ -4,6 +4,10 @@ import { parseFile } from './parser.js';
 import { getAllEngines } from '../engines/index.js';
 import { loadConfig, isRuleEnabled, getRuleSeverity, meetsConfidenceThreshold } from './config.js';
 import { PackageResolver, GitIgnoreParser, isTestFile } from '../utils/index.js';
+import { enrichIssueWithRisk } from './risk-scorer.js';
+import { adjustSeverities } from './severity-adjuster.js';
+import { deduplicateIssues } from './deduplicator.js';
+import { shouldAutoIgnore, shouldBoostConfidence } from './smart-filters.js';
 import * as fs from 'fs';
 
 interface AnalyzeOptions {
@@ -43,7 +47,13 @@ export async function analyzeProject(_options: AnalyzeOptions): Promise<Analysis
   }
 
   // Discover files
-  const files = await discoverFiles(cwd, config, gitignoreParser);
+  const allDiscoveredFiles = await discoverFiles(cwd, config, gitignoreParser);
+
+  // CRITICAL FIX: Filter test files BEFORE analysis if excludeTestFiles is enabled
+  // This prevents test files from being processed at all, reducing false positives
+  const files = config.excludeTestFiles
+    ? allDiscoveredFiles.filter(f => !isTestFile(f))
+    : allDiscoveredFiles;
 
   // Get all enabled engines
   const engines = getAllEngines();
@@ -54,13 +64,8 @@ export async function analyzeProject(_options: AnalyzeOptions): Promise<Analysis
 
   for (const filePath of files) {
     try {
-      // Check if this is a test file
+      // Check if this is a test file (for metadata purposes)
       const isTest = isTestFile(filePath);
-
-      // Skip test files if configured
-      if (config.excludeTestFiles && isTest) {
-        continue;
-      }
 
       // Parse file
       const sourceFile = parseFile(filePath);
@@ -115,16 +120,40 @@ export async function analyzeProject(_options: AnalyzeOptions): Promise<Analysis
     }
   }
 
+  // Apply smart auto-ignore filters for common false positives
+  const afterAutoIgnore = allIssues.filter(issue => !shouldAutoIgnore(issue));
+
   // Filter issues by confidence threshold
-  const threshold = config.confidenceThreshold || 'low';
-  const filteredIssues = allIssues.filter(issue => meetsConfidenceThreshold(issue, threshold));
+  const threshold = config.confidenceThreshold || 'medium';
+  const filteredIssues = afterAutoIgnore.filter(issue => meetsConfidenceThreshold(issue, threshold));
+
+  // Apply smart severity adjustments based on context
+  let processedIssues = adjustSeverities(filteredIssues);
+
+  // Boost confidence for high-quality issues
+  processedIssues = processedIssues.map(issue => {
+    if (shouldBoostConfidence(issue) && issue.confidence !== 'high') {
+      return { ...issue, confidence: 'high' as const };
+    }
+    return issue;
+  });
+
+  // Enrich with risk scores and priority levels
+  processedIssues = processedIssues.map(enrichIssueWithRisk);
+
+  // Sort by risk score (highest first)
+  processedIssues.sort((a, b) => (b.riskScore || 0) - (a.riskScore || 0));
+
+  // Generate deduplication groups (always available, but optionally used)
+  const issueGroups = deduplicateIssues(processedIssues);
 
   return {
-    issues: filteredIssues,
+    issues: processedIssues,
+    issueGroups,
     stats: {
       analyzed: analyzedCount,
       cached: 0, // Phase 4: Implement caching
-      total: files.length,
+      total: allDiscoveredFiles.length,
     },
   };
 }

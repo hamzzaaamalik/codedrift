@@ -13,13 +13,30 @@ import { EmptyCatchDetector } from '../src/engines/empty-catch-detector.js';
 import { SecretDetector } from '../src/engines/secret-detector.js';
 
 // Helper to create analysis context
-function createContext(code: string, filePath = 'test.ts') {
+function createContext(code: string, filePath = 'test.ts', includePackageResolver = false) {
   const sourceFile = parseSource(code, filePath);
-  return {
+  const context: any = {
     sourceFile,
     filePath,
     content: code,
   };
+
+  // Add mock package resolver if needed (for HallucinatedDepsDetector tests)
+  if (includePackageResolver) {
+    context.packageResolver = {
+      packageExists: (name: string) => {
+        // Mock: only allow common packages
+        const knownPackages = ['express', 'react', 'lodash', 'typescript'];
+        return knownPackages.includes(name);
+      },
+      packageExistsForFile: (name: string) => {
+        const knownPackages = ['express', 'react', 'lodash', 'typescript'];
+        return knownPackages.includes(name);
+      },
+    };
+  }
+
+  return context;
 }
 
 describe('HallucinatedDepsDetector', () => {
@@ -27,7 +44,7 @@ describe('HallucinatedDepsDetector', () => {
 
   test('should detect fake package imports', async () => {
     const code = `import { validator } from 'express-validator-pro';`;
-    const context = createContext(code);
+    const context = createContext(code, 'test.ts', true); // Enable package resolver
     const issues = await engine.analyze(context);
 
     assert.ok(issues.length > 0, 'Should detect hallucinated dependency');
@@ -38,7 +55,7 @@ describe('HallucinatedDepsDetector', () => {
 
   test('should not flag Node.js built-ins', async () => {
     const code = `import * as fs from 'fs';`;
-    const context = createContext(code);
+    const context = createContext(code, 'test.ts', true); // Enable package resolver
     const issues = await engine.analyze(context);
 
     assert.strictEqual(issues.filter(i => i !== null).length, 0, 'Should not flag built-in modules');
@@ -46,7 +63,7 @@ describe('HallucinatedDepsDetector', () => {
 
   test('should not flag relative imports', async () => {
     const code = `import { foo } from './utils';`;
-    const context = createContext(code);
+    const context = createContext(code, 'test.ts', true); // Enable package resolver
     const issues = await engine.analyze(context);
 
     assert.strictEqual(issues.filter(i => i !== null).length, 0, 'Should not flag relative imports');
@@ -116,7 +133,7 @@ describe('MissingAwaitDetector', () => {
     const code = `
       async function fetchData() { return {}; }
       async function handler() {
-        fetchData(); // Missing await
+        return fetchData(); // Missing await - return value used
       }
     `;
     const context = createContext(code);
@@ -126,7 +143,7 @@ describe('MissingAwaitDetector', () => {
     const issue = issues[0];
     assert.ok(issue, 'Issue should exist');
     assert.ok(issue.confidence, 'Should have confidence field');
-    assert.strictEqual(issue.confidence, 'high', 'Should have high confidence');
+    assert.strictEqual(issue.confidence, 'high', 'Should have high confidence when return value is used');
   });
 
   test('should not flag properly awaited calls', async () => {

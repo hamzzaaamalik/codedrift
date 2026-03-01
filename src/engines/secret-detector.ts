@@ -69,8 +69,7 @@ export class SecretDetector extends BaseEngine {
     // { name: 'Azure Client Secret', pattern: /[a-zA-Z0-9~_\-\.]{34,40}/, severity: 'warning' },
     // { name: 'Azure SAS Token', pattern: /sig=[A-Za-z0-9%]+/, severity: 'error' },
     { name: 'Azure Connection String', pattern: /DefaultEndpointsProtocol=https;AccountName=[a-z0-9]+;AccountKey=[A-Za-z0-9+/=]{88}/, severity: 'error' },
-    // Tightened Azure PAT regex - must be 52 lowercase alphanumeric chars (reduced false positives)
-    { name: 'Azure DevOps PAT', pattern: /^[a-z0-9]{52}$/, severity: 'warning', minimumEntropy: 4.5 },
+    // Azure PAT pattern removed - too broad, causes false positives with Nostr keys and other 52-char hex strings
     // UUIDs are too generic - disabled
     // { name: 'Azure Subscription ID', pattern: /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, severity: 'warning' },
     // { name: 'Azure App ID', pattern: /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, severity: 'warning' },
@@ -106,7 +105,7 @@ export class SecretDetector extends BaseEngine {
     // { name: 'Jenkins API Token', pattern: /[a-f0-9]{32}/, severity: 'warning' },
     // { name: 'Jenkins Crumb', pattern: /[a-f0-9]{32}/, severity: 'warning' },
     // { name: 'Drone CI Token', pattern: /[a-zA-Z0-9]{32}/, severity: 'warning' },
-    { name: 'Azure DevOps PAT', pattern: /[a-z0-9]{52}/, severity: 'warning' },
+    // Azure DevOps PAT pattern removed - too broad, causes false positives with Nostr keys and other 52-char hex strings
     // { name: 'TeamCity Token', pattern: /eyJ[A-Za-z0-9_\/+=\-]+/, severity: 'warning' },
     // { name: 'Bamboo Token', pattern: /[A-Z0-9]{16}/, severity: 'warning' },
     // { name: 'CodeShip AES Key', pattern: /[a-zA-Z0-9+/=]{44}/, severity: 'error' },

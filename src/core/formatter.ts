@@ -5,7 +5,13 @@
 import type { AnalysisResult, Issue, JSONReport, CodeDriftConfig } from '../types/index.js';
 import chalk from 'chalk';
 
-export function formatTerminal(result: AnalysisResult, _config: CodeDriftConfig): string {
+interface FormatterOptions {
+  showRiskScores?: boolean;
+  deduplicate?: boolean;
+}
+
+export function formatTerminal(result: AnalysisResult, _config: CodeDriftConfig, options?: FormatterOptions): string {
+  const showRiskScores = options?.showRiskScores || false;
   const { issues, stats } = result;
 
   const criticalIssues = issues.filter(i => i.severity === 'error');
@@ -81,7 +87,7 @@ export function formatTerminal(result: AnalysisResult, _config: CodeDriftConfig)
     const toShow = prioritized.slice(0, 10);
 
     toShow.forEach((issue, index) => {
-      output += '\n' + formatIssueSummary(issue, index + 1);
+      output += '\n' + formatIssueSummary(issue, index + 1, showRiskScores);
     });
 
     if (criticalIssues.length > 10) {
@@ -194,14 +200,21 @@ function getRuleName(engine: string): string {
 /**
  * Format a single issue in condensed format
  */
-function formatIssueSummary(issue: Issue, index: number): string {
+function formatIssueSummary(issue: Issue, index: number, showRiskScores = false): string {
   let output = '';
 
   const confidence = issue.confidence || 'high';
   const confidenceBadge = getConfidenceBadge(confidence);
 
   const fileLocation = `${issue.filePath}:${issue.location.line}`;
-  output += `  ${chalk.bold(index + '.')} ${chalk.cyan(fileLocation)} ${confidenceBadge}\n`;
+
+  let badges = confidenceBadge;
+  if (showRiskScores && issue.riskScore !== undefined) {
+    const riskBadge = getRiskBadge(issue.riskScore, issue.priority);
+    badges += ' ' + riskBadge;
+  }
+
+  output += `  ${chalk.bold(index + '.')} ${chalk.cyan(fileLocation)} ${badges}\n`;
   output += `     ${issue.message}\n`;
 
   if (issue.suggestion) {
@@ -209,6 +222,21 @@ function formatIssueSummary(issue: Issue, index: number): string {
   }
 
   return output;
+}
+
+/**
+ * Get colored risk score badge
+ */
+function getRiskBadge(riskScore: number, priority?: string): string {
+  const priorityColors = {
+    'critical': chalk.red.bold,
+    'high': chalk.yellow.bold,
+    'medium': chalk.blue.bold,
+    'low': chalk.gray.bold,
+  };
+
+  const colorFn = priorityColors[priority as keyof typeof priorityColors] || chalk.gray.bold;
+  return colorFn(`[RISK: ${riskScore}]`);
 }
 
 /**

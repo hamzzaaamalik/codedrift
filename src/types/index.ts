@@ -37,6 +37,8 @@ export interface Issue {
   suggestion?: string;
   confidence?: Confidence;
   metadata?: IssueMetadata;
+  riskScore?: number; // 0-100
+  priority?: 'critical' | 'high' | 'medium' | 'low';
 }
 
 export interface AnalysisContext {
@@ -102,8 +104,16 @@ export interface FileNode {
   hash: string;
 }
 
+export interface IssueGroup {
+  fingerprint: string;
+  primaryIssue: Issue;
+  occurrences: Issue[];
+  count: number;
+}
+
 export interface AnalysisResult {
   issues: Issue[];
+  issueGroups?: IssueGroup[]; // For deduplication view
   stats: {
     analyzed: number;
     cached: number;
@@ -122,7 +132,7 @@ export interface CacheEntry {
 
 export type RuleLevel = 'error' | 'warn' | 'off';
 
-export type OutputFormat = 'terminal' | 'json' | 'html';
+export type OutputFormat = 'terminal' | 'summary' | 'detailed' | 'compact' | 'json' | 'html';
 
 export interface CodeDriftConfig {
   // File patterns to exclude from analysis
@@ -135,6 +145,10 @@ export interface CodeDriftConfig {
     'missing-await'?: RuleLevel;
     'empty-catch'?: RuleLevel;
     'hardcoded-secret'?: RuleLevel;
+    'sql-injection'?: RuleLevel;
+    'xss-detector'?: RuleLevel;
+    'idor'?: RuleLevel;
+    'console-in-production'?: RuleLevel;
   };
 
   // Exit code behavior

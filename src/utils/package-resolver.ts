@@ -160,36 +160,71 @@ export class PackageResolver implements IPackageResolver {
       this.loadWorkspaces();
     }
 
-    // First, check if it's a workspace package itself
+    // CRITICAL FIX: Check if file is IN the package being imported (self-import scenario)
+    // This prevents false positives for workspace self-imports (e.g., openclaw importing openclaw)
+    const fileWorkspace = this.getWorkspaceName(filePath);
+    if (fileWorkspace && fileWorkspace === name) {
+      return true;
+    }
+
+    // Check if it's a workspace package (global workspace check)
     for (const workspace of this.workspaces) {
       if (workspace.name === name) {
         return true;
       }
     }
 
-    // Find the nearest package.json to this file (could be workspace package.json)
-    const nearestPackageJson = this.findNearestPackageJson(filePath);
-    if (nearestPackageJson) {
-      // Load and check dependencies in this package.json
-      let packageJson: PackageJson;
-      if (this.packageJsonCache.has(nearestPackageJson)) {
-        packageJson = this.packageJsonCache.get(nearestPackageJson)!;
-      } else {
-        packageJson = this.loadPackageJson(nearestPackageJson);
-        this.packageJsonCache.set(nearestPackageJson, packageJson);
+    // Walk up directory tree checking ALL package.json dependencies
+    // This handles cases where dependencies are defined in parent workspace packages
+    let currentDir = path.dirname(filePath);
+    const rootDir = path.dirname(this.packageJsonPath);
+
+    while (currentDir.startsWith(rootDir) && currentDir !== rootDir) {
+      const pkgPath = path.join(currentDir, 'package.json');
+      if (fs.existsSync(pkgPath)) {
+        let packageJson: PackageJson;
+        if (this.packageJsonCache.has(pkgPath)) {
+          packageJson = this.packageJsonCache.get(pkgPath)!;
+        } else {
+          try {
+            packageJson = this.loadPackageJson(pkgPath);
+            this.packageJsonCache.set(pkgPath, packageJson);
+          } catch (error) {
+            // Skip invalid package.json files
+            break;
+          }
+        }
+
+        // Check all dependency types in this package.json
+        if (packageJson && this.isInDependencies(name, packageJson)) {
+          return true;
+        }
       }
 
-      // Check all dependency types in the nearest package.json
-      if (packageJson.dependencies?.[name] ||
-          packageJson.devDependencies?.[name] ||
-          packageJson.peerDependencies?.[name] ||
-          packageJson.optionalDependencies?.[name]) {
-        return true;
+      const parentDir = path.dirname(currentDir);
+      if (parentDir === currentDir) {
+        break; // Reached filesystem root
       }
+      currentDir = parentDir;
     }
 
     // Finally, check root package.json
     return this.hasAnyDependency(name);
+  }
+
+  /**
+   * Check if a package name is in any dependency field of a package.json
+   * @param name - Package name
+   * @param packageJson - PackageJson object to check
+   * @returns True if package is in any dependency type
+   */
+  private isInDependencies(name: string, packageJson: PackageJson): boolean {
+    return !!(
+      packageJson.dependencies?.[name] ||
+      packageJson.devDependencies?.[name] ||
+      packageJson.peerDependencies?.[name] ||
+      packageJson.optionalDependencies?.[name]
+    );
   }
 
   /**

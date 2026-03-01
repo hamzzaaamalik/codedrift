@@ -11,20 +11,21 @@
  * @returns true if the file is a test file
  */
 export function isTestFile(filePath: string): boolean {
-  const lowerPath = filePath.toLowerCase();
+  // Normalize path separators to forward slashes and convert to lowercase
+  const lowerPath = filePath.toLowerCase().replace(/\\/g, '/');
 
   // Common test file patterns
   const testPatterns = [
     // Standard naming conventions
     /\.(test|spec)\.(ts|js|tsx|jsx|mjs|cjs)$/i,
 
-    // Test directories
-    /__tests__\//i,
-    /\/__test__\//i,
-    /\/tests?\//i,
-    /\/test\//i,
-    /\/specs?\//i,
-    /\/spec\//i,
+    // Test directories (match at start or after slash)
+    /(^|\/)__tests__\//i,
+    /(^|\/)__test__\//i,
+    /(^|\/)tests?\//i,
+    /(^|\/)test\//i,
+    /(^|\/)specs?\//i,
+    /(^|\/)spec\//i,
 
     // Framework-specific
     /\.e2e-spec\.(ts|js)$/i, // NestJS e2e tests
@@ -33,9 +34,9 @@ export function isTestFile(filePath: string): boolean {
     /\.unit\.(test|spec)\.(ts|js)$/i,
 
     // Cypress, Playwright, etc.
-    /\/cypress\//i,
-    /\/e2e\//i,
-    /\/integration\//i,
+    /(^|\/)cypress\//i,
+    /(^|\/)e2e\//i,
+    /(^|\/)integration\//i,
 
     // Vitest, Jest config
     /vitest\.config\.(ts|js)$/i,
@@ -43,11 +44,18 @@ export function isTestFile(filePath: string): boolean {
     /jest\.setup\.(ts|js)$/i,
 
     // Test utils/fixtures
-    /\/test-utils\//i,
-    /\/test-helpers\//i,
-    /\/fixtures\//i,
-    /__fixtures__\//i,
-    /__mocks__\//i,
+    /(^|\/)test-utils\//i,
+    /(^|\/)test-helpers\//i,
+    /(^|\/)fixtures\//i,
+    /(^|\/)__fixtures__\//i,
+    /(^|\/)__mocks__\//i,
+
+    // Additional test patterns (fix for 2,860 test file findings)
+    /\.fixture\./i,              // Fixture files
+    /(^|\/)mock/i,               // Mock files (case insensitive)
+    /(^|\/)examples\//i,         // Example files
+    /(^|\/)demos\//i,            // Demo files
+    /(^|\/)stubs\//i,            // Stub files
   ];
 
   return testPatterns.some(pattern => pattern.test(lowerPath));
@@ -61,19 +69,20 @@ export function isTestFile(filePath: string): boolean {
  * @returns true if the file is auto-generated
  */
 export function isGeneratedFile(filePath: string): boolean {
-  const lowerPath = filePath.toLowerCase();
+  // Normalize path separators to forward slashes and convert to lowercase
+  const lowerPath = filePath.toLowerCase().replace(/\\/g, '/');
 
   // Common generated file patterns
   const generatedPatterns = [
-    // Build output directories
-    /\/generated\//i,
-    /\/__generated__\//i,
-    /\/\.next\//i,
-    /\/dist\//i,
-    /\/build\//i,
-    /\/out\//i,
-    /\/output\//i,
-    /\/lib\//i, // Common for compiled libraries
+    // Build output directories (match at start or after slash)
+    /(^|\/)generated\//i,
+    /(^|\/)__generated__\//i,
+    /(^|\/)\.next\//i,
+    /(^|\/)dist\//i,
+    /(^|\/)build\//i,
+    /(^|\/)out\//i,
+    /(^|\/)output\//i,
+    /(^|\/)lib\//i, // Common for compiled libraries
 
     // Auto-generated file markers
     /@generated/i,
@@ -149,6 +158,86 @@ export function getFileCategory(filePath: string): 'test' | 'generated' | 'produ
     return 'generated';
   }
   return 'production';
+}
+
+/**
+ * Check if a file is a CLI/executable file where console output is expected
+ * @param filePath - The file path to check
+ * @returns true if file is a CLI/executable
+ */
+export function isCLIFile(filePath: string): boolean {
+  const lowerPath = filePath.toLowerCase().replace(/\\/g, '/');
+
+  const cliPatterns = [
+    // CLI directories
+    /(^|\/)bin\//i,
+    /(^|\/)cli\//i,
+    /(^|\/)scripts\//i,
+    /(^|\/)tools\//i,
+
+    // CLI file names
+    /\/cli\.(ts|js|mjs|cjs)$/i,
+    /\/index\.ts$/i, // Often CLI entry point for packages
+    /\/main\.(ts|js)$/i,
+
+    // Debug/dev tools
+    /(^|\/)debug\//i,
+    /(^|\/)dev-tools\//i,
+    /(^|\/)dev-server\//i,
+  ];
+
+  return cliPatterns.some(pattern => pattern.test(lowerPath));
+}
+
+/**
+ * Check if a file is a configuration file
+ * @param filePath - The file path to check
+ * @returns true if file is a config file
+ */
+export function isConfigFile(filePath: string): boolean {
+  const lowerPath = filePath.toLowerCase().replace(/\\/g, '/');
+
+  const configPatterns = [
+    // Config directories
+    /(^|\/)config\//i,
+    /(^|\/)configs\//i,
+    /(^|\/)configuration\//i,
+
+    // Config files
+    /\.config\.(ts|js|mjs|cjs)$/i,
+    /\.conf\.(ts|js)$/i,
+    /\/config\.(ts|js)$/i,
+    /\/settings\.(ts|js)$/i,
+
+    // Specific configs
+    /tsconfig.*\.json$/i,
+    /jest\.config\./i,
+    /webpack\.config\./i,
+    /vite\.config\./i,
+    /rollup\.config\./i,
+  ];
+
+  return configPatterns.some(pattern => pattern.test(lowerPath));
+}
+
+/**
+ * Check if a file is a migration/seed file
+ * @param filePath - The file path to check
+ * @returns true if file is a migration/seed file
+ */
+export function isMigrationFile(filePath: string): boolean {
+  const lowerPath = filePath.toLowerCase().replace(/\\/g, '/');
+
+  const migrationPatterns = [
+    /(^|\/)migrations?\//i,
+    /(^|\/)migrate\//i,
+    /(^|\/)seeds?\//i,
+    /(^|\/)seeders?\//i,
+    /\.migration\.(ts|js)$/i,
+    /\.seed\.(ts|js)$/i,
+  ];
+
+  return migrationPatterns.some(pattern => pattern.test(lowerPath));
 }
 
 /**

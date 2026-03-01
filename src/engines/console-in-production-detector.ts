@@ -14,6 +14,7 @@
 import { BaseEngine } from './base-engine.js';
 import { AnalysisContext, Issue } from '../types/index.js';
 import { traverse } from '../core/parser.js';
+import { isCLIFile, isMigrationFile } from '../utils/file-utils.js';
 import * as ts from 'typescript';
 
 export class ConsoleInProductionDetector extends BaseEngine {
@@ -164,8 +165,18 @@ export class ConsoleInProductionDetector extends BaseEngine {
 
   /**
    * Check if file is a development/debug utility
+   * Enhanced with context-aware detection
    */
   private isDevelopmentFile(filePath: string): boolean {
+    // Use utility functions for CLI and migration detection
+    if (isCLIFile(filePath)) {
+      return true; // CLI files are expected to use console for output
+    }
+
+    if (isMigrationFile(filePath)) {
+      return true; // Migration files often use console for progress/logging
+    }
+
     const devPatterns = [
       /\/dev\//,
       /\/debug\//,
@@ -175,6 +186,8 @@ export class ConsoleInProductionDetector extends BaseEngine {
       /debug\.ts$/,
       /logger\.ts$/,  // Logger implementations are allowed to use console
       /log\.ts$/,
+      /\/seed\//,     // Seed scripts
+      /\/setup\//,    // Setup scripts
     ];
 
     return devPatterns.some(pattern => pattern.test(filePath));
