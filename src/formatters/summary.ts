@@ -37,9 +37,14 @@ export function formatSummary(
 
   let output = '\n';
 
-  // Analysis header
+  // Analysis header with file breakdown
   const analyzeIcon = useEmoji ? '🔍 ' : '';
-  output += gray(`${analyzeIcon}Analyzing ${stats.total.toLocaleString()} files...\n`);
+  const excluded = stats.total - stats.analyzed;
+  if (excluded > 0) {
+    output += gray(`${analyzeIcon}Scanned ${stats.total.toLocaleString()} files, analyzing ${stats.analyzed.toLocaleString()} (${excluded.toLocaleString()} excluded by config)\n`);
+  } else {
+    output += gray(`${analyzeIcon}Analyzing ${stats.total.toLocaleString()} files...\n`);
+  }
   output += '\n';
 
   // Complete header

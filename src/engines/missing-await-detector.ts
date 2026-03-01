@@ -118,7 +118,7 @@ export class MissingAwaitDetector extends BaseEngine {
     }
 
     return this.createIssue(context, node, message, {
-      severity: 'error',
+      severity: confidence === 'high' ? 'error' : 'warning',
       confidence,
       suggestion,
     });
@@ -367,6 +367,14 @@ export class MissingAwaitDetector extends BaseEngine {
     ];
 
     if (fireAndForgetPatterns.includes(methodName)) {
+      return true;
+    }
+
+    // Pattern-based allowlist: log*, track*, emit*, send* (but not sendData/sendRequest)
+    if (methodName.match(/^(log|track|emit)[A-Z]/i)) {
+      return true;
+    }
+    if (methodName.match(/^send[A-Z]/) && !methodName.match(/^send(Data|Request|Message)$/i)) {
       return true;
     }
 

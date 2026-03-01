@@ -101,14 +101,16 @@ export class UnsafeRegexDetector extends BaseEngine {
     const result = safeRegex(pattern);
 
     if (!result) {
-      // Pattern is unsafe - high confidence because safe-regex2 is reliable
+      // Pattern is unsafe - downgraded to warning (was error)
+      // ReDoS is often low-risk in practice (error parsing, markdown, sanitization)
+      // Only genuinely user-facing regex on untrusted input is critical
       return this.createIssue(
         context,
         node,
         'Unsafe regex pattern - vulnerable to ReDoS (Regular Expression Denial of Service)',
         {
-          severity: 'error',
-          suggestion: 'Simplify regex pattern. Avoid nested quantifiers like (a+)+, (a*)*, or (a+)*',
+          severity: 'warning',
+          suggestion: 'Simplify regex pattern. Avoid nested quantifiers like (a+)+, (a*)*, or (a+)*. If this regex processes untrusted user input, this is a critical security issue.',
           confidence: 'high',
         }
       );

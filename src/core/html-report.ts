@@ -631,6 +631,54 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
         }
 
         /* Enhanced Issue Cards */
+        .issue-group {
+            border: 2px solid #3b82f6;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            overflow: hidden;
+            background: white;
+        }
+
+        .issue-group-header {
+            padding: 16px 20px;
+            background: #eff6ff;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            user-select: none;
+        }
+
+        .issue-group-header:hover {
+            background: #dbeafe;
+        }
+
+        .issue-group-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .issue-group-count {
+            font-size: 13px;
+            color: #6b7280;
+        }
+
+        .issue-group-expand {
+            color: #3b82f6;
+            font-size: 20px;
+            transition: transform 0.2s;
+        }
+
+        .issue-group.expanded .issue-group-expand {
+            transform: rotate(180deg);
+        }
+
+        .issue-group-body {
+            padding: 16px;
+            border-top: 1px solid #e5e7eb;
+        }
+
         .issue-card {
             border: 1px solid #e5e7eb;
             border-radius: 8px;
@@ -1181,7 +1229,7 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
                 <div class="section-body">
                     <!-- All Issues (Filtered by JavaScript) -->
                     <div id="issues-list">
-                        ${renderIssues(issues)}
+                        ${renderIssuesWithGrouping(issues)}
                     </div>
                 </div>
             </div>
@@ -1205,7 +1253,7 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
         <footer>
             <div class="enhanced-footer">
                 <div>
-                    <p><strong>CodeDrift v1.2.1</strong> - AI Code Safety Guardian</p>
+                    <p><strong>CodeDrift v1.2.2</strong> - AI Code Safety Guardian</p>
                     <p style="margin-top: 4px;">
                         <a href="https://github.com/hamzzaaamalik/codedrift" target="_blank">github.com/hamzzaaamalik/codedrift</a>
                     </p>
@@ -1232,16 +1280,31 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
         };
         const totalIssues = ${issues.length};
 
+        function toggleIssueGroup(header) {
+            const group = header.closest('.issue-group');
+            group.classList.toggle('expanded');
+            const body = group.querySelector('.issue-group-body');
+            body.style.display = body.style.display === 'none' ? 'block' : 'none';
+        }
+
         function toggleIssueCard(header) {
             header.closest('.issue-card').classList.toggle('expanded');
         }
 
         function expandAll() {
             document.querySelectorAll('.issue-card').forEach(card => card.classList.add('expanded'));
+            document.querySelectorAll('.issue-group').forEach(group => {
+                group.classList.add('expanded');
+                group.querySelector('.issue-group-body').style.display = 'block';
+            });
         }
 
         function collapseAll() {
             document.querySelectorAll('.issue-card').forEach(card => card.classList.remove('expanded'));
+            document.querySelectorAll('.issue-group').forEach(group => {
+                group.classList.remove('expanded');
+                group.querySelector('.issue-group-body').style.display = 'none';
+            });
         }
 
         function applyFilters() {
@@ -1439,6 +1502,82 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
     </script>
 </body>
 </html>`;
+}
+
+/**
+ * Render issues with intelligent grouping for high-volume issue types
+ * Groups issues with 50+ instances under a collapsible summary
+ */
+function renderIssuesWithGrouping(issues: Issue[]): string {
+  // Group by engine to detect high-volume issues
+  const byEngine = new Map<string, Issue[]>();
+  for (const issue of issues) {
+    const existing = byEngine.get(issue.engine) || [];
+    existing.push(issue);
+    byEngine.set(issue.engine, existing);
+  }
+
+  // Identify high-volume groups (50+ issues)
+  const highVolumeThreshold = 50;
+  const highVolumeEngines = new Set<string>();
+  for (const [engine, engineIssues] of byEngine.entries()) {
+    if (engineIssues.length >= highVolumeThreshold) {
+      highVolumeEngines.add(engine);
+    }
+  }
+
+  // If no high-volume groups, render normally
+  if (highVolumeEngines.size === 0) {
+    return renderIssues(issues);
+  }
+
+  // Render with grouping
+  const engineNames: Record<string, string> = {
+    'idor': 'Insecure Direct Object Reference',
+    'missing-input-validation': 'Missing Input Validation',
+    'hardcoded-secret': 'Hardcoded Secrets',
+    'stack-trace-exposure': 'Stack Trace Exposure',
+    'missing-await': 'Missing Await',
+    'async-foreach': 'Async forEach/map',
+    'hallucinated-deps': 'Hallucinated Dependencies',
+    'unsafe-regex': 'Unsafe Regular Expressions (ReDoS)',
+    'console-in-production': 'Console in Production',
+    'empty-catch': 'Empty Catch Blocks',
+  };
+
+  let html = '';
+  const renderedEngines = new Set<string>();
+
+  // Render high-volume groups first (collapsed by default)
+  for (const engine of highVolumeEngines) {
+    const engineIssues = byEngine.get(engine)!;
+    const fileCount = new Set(engineIssues.map(i => i.filePath)).size;
+    const engineName = engineNames[engine] || engine;
+
+    html += `
+    <div class="issue-group">
+      <div class="issue-group-header" onclick="toggleIssueGroup(this)">
+        <div class="issue-group-info">
+          <strong>${escapeHtml(engineName)}</strong>
+          <span class="issue-group-count">${engineIssues.length} issues across ${fileCount} files</span>
+        </div>
+        <div class="issue-group-expand">▼</div>
+      </div>
+      <div class="issue-group-body" style="display: none;">
+        ${renderIssues(engineIssues)}
+      </div>
+    </div>
+    `;
+    renderedEngines.add(engine);
+  }
+
+  // Render remaining issues normally
+  const remainingIssues = issues.filter(i => !renderedEngines.has(i.engine));
+  if (remainingIssues.length > 0) {
+    html += renderIssues(remainingIssues);
+  }
+
+  return html;
 }
 
 function renderIssues(issues: Issue[]): string {
