@@ -46,6 +46,12 @@ export class ConsoleInProductionDetector extends BaseEngine {
 
   /**
    * Check if this is a console method call
+   *
+   * Confidence levels:
+   * - High: Console.log with sensitive data (password, token, etc.)
+   * - High: Console in production route handlers
+   * - Medium: Console in regular production code
+   * - Low: Console.error (may be intentional error logging)
    */
   private checkConsoleCall(node: ts.CallExpression, context: AnalysisContext): Issue | null {
     const { expression } = node;
@@ -79,16 +85,50 @@ export class ConsoleInProductionDetector extends BaseEngine {
 
     let message = `console.${methodName}() in production code`;
     let severity: 'error' | 'warning' = 'warning';
+    let confidence: 'high' | 'medium' | 'low' = 'medium';
 
     if (sensitivity.isSensitive) {
       message = `console.${methodName}() logging potentially sensitive data: ${sensitivity.reason}`;
       severity = 'error';
+      confidence = 'high'; // High confidence for sensitive data
+    } else if (methodName === 'error') {
+      // console.error might be intentional for error logging
+      confidence = 'low';
+    } else if (this.isInRouteHandler(node)) {
+      // Console in route handlers is more likely a bug
+      confidence = 'high';
     }
 
     return this.createIssue(context, node, message, {
       severity,
       suggestion: `Use proper logger (winston, pino, bunyan) with log levels and redaction. Remove console.${methodName}() from production code.`,
+      confidence,
     });
+  }
+
+  /**
+   * Check if console call is within a route handler
+   */
+  private isInRouteHandler(node: ts.Node): boolean {
+    let current = node.parent;
+
+    while (current) {
+      // Check for Express/Fastify style: app.get('/path', (req, res) => {})
+      if (ts.isCallExpression(current)) {
+        const { expression } = current;
+        if (ts.isPropertyAccessExpression(expression)) {
+          const methodName = expression.name.text;
+          const routeMethods = ['get', 'post', 'put', 'patch', 'delete', 'all', 'use'];
+          if (routeMethods.includes(methodName)) {
+            return true;
+          }
+        }
+      }
+
+      current = current.parent;
+    }
+
+    return false;
   }
 
   /**

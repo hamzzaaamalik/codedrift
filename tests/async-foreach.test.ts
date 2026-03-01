@@ -19,11 +19,15 @@ test('AsyncForEachDetector', async (t) => {
     `;
 
     const sourceFile = parseSource(code);
-    const issues = await detector.analyze({ filePath: 'test.ts', sourceFile, content: code });
+    const issues = await detector.analyze({ filePath: 'src/api.ts', sourceFile, content: code });
 
     assert.strictEqual(issues.length, 1);
     assert.ok(issues[0].message.includes('forEach'));
     assert.ok(issues[0].message.includes('out of order'));
+    assert.ok(issues[0].confidence, 'Should have confidence field');
+    assert.strictEqual(issues[0].confidence, 'high', 'Should have high confidence for production code');
+    assert.ok(issues[0].metadata, 'Should have metadata');
+    assert.strictEqual(issues[0].metadata.isTestFile, false, 'Should not be a test file');
   });
 
   await t.test('should detect map with async callback', async () => {
@@ -34,10 +38,12 @@ test('AsyncForEachDetector', async (t) => {
     `;
 
     const sourceFile = parseSource(code);
-    const issues = await detector.analyze({ filePath: 'test.ts', sourceFile, content: code });
+    const issues = await detector.analyze({ filePath: 'src/utils.ts', sourceFile, content: code });
 
     assert.strictEqual(issues.length, 1);
     assert.ok(issues[0].message.includes('map'));
+    assert.ok(issues[0].confidence, 'Should have confidence field');
+    assert.strictEqual(issues[0].confidence, 'high', 'Should have high confidence');
   });
 
   await t.test('should detect filter with async callback', async () => {
@@ -93,5 +99,22 @@ test('AsyncForEachDetector', async (t) => {
     const issues = await detector.analyze({ filePath: 'test.ts', sourceFile, content: code });
 
     assert.strictEqual(issues.length, 0);
+  });
+
+  await t.test('should downgrade confidence for test files', async () => {
+    const code = `
+      items.forEach(async (item) => {
+        await process(item);
+      });
+    `;
+
+    const sourceFile = parseSource(code);
+    const issues = await detector.analyze({ filePath: 'src/api.test.ts', sourceFile, content: code });
+
+    assert.strictEqual(issues.length, 1);
+    assert.ok(issues[0].confidence, 'Should have confidence field');
+    assert.strictEqual(issues[0].confidence, 'medium', 'Should downgrade to medium for test files');
+    assert.ok(issues[0].metadata, 'Should have metadata');
+    assert.strictEqual(issues[0].metadata.isTestFile, true, 'Should be marked as test file');
   });
 });

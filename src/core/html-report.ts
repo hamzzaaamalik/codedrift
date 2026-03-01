@@ -15,6 +15,10 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
   const issuesByFile = groupIssuesByFile(issues);
   const issuesByEngine = groupIssuesByEngine(issues);
 
+  const highConfidence = issues.filter(i => (i.confidence || 'high') === 'high');
+  const mediumConfidence = issues.filter(i => (i.confidence || 'high') === 'medium');
+  const lowConfidence = issues.filter(i => (i.confidence || 'high') === 'low');
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -76,7 +80,7 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
 
         .summary-grid {
             display: grid;
-            grid-template-columns: repeat(5, 1fr);
+            grid-template-columns: repeat(4, 1fr);
             gap: 16px;
             margin-bottom: 32px;
         }
@@ -207,6 +211,39 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
         .badge-warning {
             background: #f59e0b;
             color: white;
+        }
+
+        .badge-confidence {
+            padding: 3px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
+            margin-left: 8px;
+        }
+
+        .badge-high {
+            background: #10b981;
+            color: white;
+        }
+
+        .badge-medium {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .badge-low {
+            background: #6b7280;
+            color: white;
+        }
+
+        .view-container {
+            display: none;
+        }
+
+        .view-container.active {
+            display: block;
         }
 
         .issue-message {
@@ -364,6 +401,18 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
                     <div class="value warning">${warnings.length}</div>
                 </div>
                 <div class="metric-card">
+                    <div class="label">High Confidence</div>
+                    <div class="value ${highConfidence.length > 0 ? 'critical' : 'success'}">${highConfidence.length}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">Medium Confidence</div>
+                    <div class="value ${mediumConfidence.length > 0 ? 'warning' : 'neutral'}">${mediumConfidence.length}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">Low Confidence</div>
+                    <div class="value neutral">${lowConfidence.length}</div>
+                </div>
+                <div class="metric-card">
                     <div class="label">Files Scanned</div>
                     <div class="value neutral">${stats.analyzed}</div>
                 </div>
@@ -386,36 +435,84 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
             ` : `
             <div class="section">
                 <div class="section-header">
-                    <h2>Issues by Severity</h2>
+                    <h2>Issues</h2>
                 </div>
                 <div class="section-body">
                     <div class="filter-tabs">
-                        <button class="filter-tab active" onclick="filterBySeverity('all')">All (${issues.length})</button>
-                        <button class="filter-tab" onclick="filterBySeverity('error')">Critical (${criticalIssues.length})</button>
-                        <button class="filter-tab" onclick="filterBySeverity('warning')">Warnings (${warnings.length})</button>
+                        <button class="filter-tab active" onclick="showView('all')">All (${issues.length})</button>
+                        <button class="filter-tab" onclick="showView('severity')">By Severity</button>
+                        <button class="filter-tab" onclick="showView('file')">By File</button>
+                        <button class="filter-tab" onclick="showView('engine')">By Engine</button>
+                        <button class="filter-tab" onclick="showView('confidence')">By Confidence</button>
                     </div>
 
-                    <div id="issues-container">
+                    <!-- View: All Issues -->
+                    <div id="view-all" class="view-container active">
                         ${renderIssues(issues)}
                     </div>
-                </div>
-            </div>
 
-            <div class="section">
-                <div class="section-header">
-                    <h2>Issues by File</h2>
-                </div>
-                <div class="section-body">
-                    ${renderIssuesByFile(issuesByFile)}
-                </div>
-            </div>
+                    <!-- View: By Severity -->
+                    <div id="view-severity" class="view-container">
+                        ${criticalIssues.length > 0 ? `
+                        <div class="file-group">
+                            <div class="file-group-header">
+                                <span>Critical Issues</span>
+                                <span class="file-count">${criticalIssues.length} issue${criticalIssues.length === 1 ? '' : 's'}</span>
+                            </div>
+                            ${renderIssues(criticalIssues)}
+                        </div>
+                        ` : ''}
+                        ${warnings.length > 0 ? `
+                        <div class="file-group">
+                            <div class="file-group-header">
+                                <span>Warnings</span>
+                                <span class="file-count">${warnings.length} issue${warnings.length === 1 ? '' : 's'}</span>
+                            </div>
+                            ${renderIssues(warnings)}
+                        </div>
+                        ` : ''}
+                    </div>
 
-            <div class="section">
-                <div class="section-header">
-                    <h2>Issues by Detection Engine</h2>
-                </div>
-                <div class="section-body">
-                    ${renderIssuesByEngine(issuesByEngine)}
+                    <!-- View: By File -->
+                    <div id="view-file" class="view-container">
+                        ${renderIssuesByFile(issuesByFile)}
+                    </div>
+
+                    <!-- View: By Engine -->
+                    <div id="view-engine" class="view-container">
+                        ${renderIssuesByEngine(issuesByEngine)}
+                    </div>
+
+                    <!-- View: By Confidence -->
+                    <div id="view-confidence" class="view-container">
+                        ${highConfidence.length > 0 ? `
+                        <div class="file-group">
+                            <div class="file-group-header">
+                                <span>High Confidence</span>
+                                <span class="file-count">${highConfidence.length} issue${highConfidence.length === 1 ? '' : 's'}</span>
+                            </div>
+                            ${renderIssues(highConfidence)}
+                        </div>
+                        ` : ''}
+                        ${mediumConfidence.length > 0 ? `
+                        <div class="file-group">
+                            <div class="file-group-header">
+                                <span>Medium Confidence</span>
+                                <span class="file-count">${mediumConfidence.length} issue${mediumConfidence.length === 1 ? '' : 's'}</span>
+                            </div>
+                            ${renderIssues(mediumConfidence)}
+                        </div>
+                        ` : ''}
+                        ${lowConfidence.length > 0 ? `
+                        <div class="file-group">
+                            <div class="file-group-header">
+                                <span>Low Confidence</span>
+                                <span class="file-count">${lowConfidence.length} issue${lowConfidence.length === 1 ? '' : 's'}</span>
+                            </div>
+                            ${renderIssues(lowConfidence)}
+                        </div>
+                        ` : ''}
+                    </div>
                 </div>
             </div>
             `}
@@ -444,20 +541,21 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
     </div>
 
     <script>
-        function filterBySeverity(severity) {
-            const issues = document.querySelectorAll('.issue');
-            const tabs = document.querySelectorAll('.filter-tab');
+        function showView(viewName) {
+            // Hide all view containers
+            const views = document.querySelectorAll('.view-container');
+            views.forEach(view => view.classList.remove('active'));
 
+            // Show selected view
+            const selectedView = document.getElementById('view-' + viewName);
+            if (selectedView) {
+                selectedView.classList.add('active');
+            }
+
+            // Update tab states
+            const tabs = document.querySelectorAll('.filter-tab');
             tabs.forEach(tab => tab.classList.remove('active'));
             event.target.classList.add('active');
-
-            issues.forEach(issue => {
-                if (severity === 'all') {
-                    issue.style.display = 'block';
-                } else {
-                    issue.style.display = issue.classList.contains(severity) ? 'block' : 'none';
-                }
-            });
         }
     </script>
 </body>
@@ -465,16 +563,22 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
 }
 
 function renderIssues(issues: Issue[]): string {
-  return issues.map(issue => `
+  return issues.map(issue => {
+    const confidence = issue.confidence || 'high';
+    return `
     <div class="issue ${issue.severity}">
         <div class="issue-header">
             <div class="issue-location">${escapeHtml(issue.filePath)}:${issue.location.line}</div>
-            <span class="issue-badge badge-${issue.severity}">${issue.severity}</span>
+            <div>
+                <span class="issue-badge badge-${issue.severity}">${issue.severity}</span>
+                <span class="badge-confidence badge-${confidence}">${confidence}</span>
+            </div>
         </div>
         <div class="issue-message">${escapeHtml(issue.message)}</div>
         ${issue.suggestion ? `<div class="issue-suggestion">${escapeHtml(issue.suggestion)}</div>` : ''}
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function renderIssuesByFile(issuesByFile: Map<string, Issue[]>): string {
@@ -556,6 +660,21 @@ function groupIssuesByEngine(issues: Issue[]): Map<string, Issue[]> {
     const existing = map.get(issue.engine) || [];
     existing.push(issue);
     map.set(issue.engine, existing);
+  }
+
+  return map;
+}
+
+// Function kept for potential future use
+// @ts-expect-error - Unused function kept for future use
+function _groupIssuesByConfidence(issues: Issue[]): Map<string, Issue[]> {
+  const map = new Map<string, Issue[]>();
+
+  for (const issue of issues) {
+    const confidence = issue.confidence || 'high';
+    const existing = map.get(confidence) || [];
+    existing.push(issue);
+    map.set(confidence, existing);
   }
 
   return map;

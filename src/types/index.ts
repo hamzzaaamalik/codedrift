@@ -3,6 +3,27 @@
  */
 
 export type Severity = 'error' | 'warning' | 'info';
+export type Confidence = 'high' | 'medium' | 'low';
+
+/**
+ * Additional metadata about the file and context where an issue was found
+ */
+export interface IssueMetadata {
+  /** Whether the file is a test file */
+  isTestFile: boolean;
+  /** Whether the file is auto-generated */
+  isGeneratedFile: boolean;
+  /** Name of the workspace package this file belongs to (for monorepos) */
+  workspaceName?: string;
+  /** Shannon entropy of the code (higher = more complex/random) */
+  entropy?: number;
+  /** A snippet of code around the issue for context */
+  contextSnippet?: string;
+  /** Missing package name (for hallucinated-deps detector) */
+  missingPackage?: string;
+  /** Allow any additional metadata */
+  [key: string]: any;
+}
 
 export interface Issue {
   engine: string;
@@ -14,6 +35,8 @@ export interface Issue {
     column: number;
   };
   suggestion?: string;
+  confidence?: Confidence;
+  metadata?: IssueMetadata;
 }
 
 export interface AnalysisContext {
@@ -21,6 +44,44 @@ export interface AnalysisContext {
   filePath: string;
   content: string;
   dependencyGraph?: DependencyGraph;
+  /** Package resolver for checking dependencies and workspaces */
+  packageResolver?: PackageResolver;
+  /** Partial metadata to be merged into issue metadata */
+  metadata?: Partial<IssueMetadata>;
+}
+
+/**
+ * Result of package resolution
+ */
+export interface PackageResolution {
+  /** Path to the nearest package.json */
+  packageJsonPath: string;
+  /** Name of the workspace (if in a monorepo) */
+  workspaceName?: string;
+  /** Whether the package is part of a workspace */
+  isWorkspace: boolean;
+}
+
+/**
+ * Package resolver interface for dependency checking
+ */
+export interface PackageResolver {
+  /** Loaded package.json content */
+  packageJson: any;
+  /** Check if a package exists in dependencies */
+  hasDependency(name: string): boolean;
+  /** Check if a package exists in devDependencies */
+  hasDevDependency(name: string): boolean;
+  /** Check if a package exists in any dependency field */
+  hasAnyDependency(name: string): boolean;
+  /** Find nearest package.json for a file path */
+  findNearestPackageJson(filePath: string): string | null;
+  /** Check if a package exists (alias for hasAnyDependency) */
+  packageExists(name: string): boolean;
+  /** Check if a package exists for a specific file (workspace-aware) */
+  packageExistsForFile?(name: string, filePath: string): boolean;
+  /** Get workspace name for a file path */
+  getWorkspaceName(filePath: string): string | undefined;
 }
 
 export interface AnalysisEngine {
@@ -88,6 +149,16 @@ export interface CodeDriftConfig {
   // Output options
   format?: OutputFormat;
   output?: string;
+
+  // Advanced filtering options
+  /** Respect .gitignore patterns when scanning files */
+  respectGitignore?: boolean;
+  /** Root directory of the workspace/project */
+  workspaceRoot?: string;
+  /** Exclude test files from analysis */
+  excludeTestFiles?: boolean;
+  /** Minimum confidence threshold for reporting issues */
+  confidenceThreshold?: Confidence;
 }
 
 export interface JSONReport {

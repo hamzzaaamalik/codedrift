@@ -11,6 +11,11 @@ export function formatTerminal(result: AnalysisResult, _config: CodeDriftConfig)
   const criticalIssues = issues.filter(i => i.severity === 'error');
   const warnings = issues.filter(i => i.severity === 'warning');
 
+  // Group by confidence
+  const highConfidence = issues.filter(i => (i.confidence || 'high') === 'high');
+  const mediumConfidence = issues.filter(i => (i.confidence || 'high') === 'medium');
+  const lowConfidence = issues.filter(i => (i.confidence || 'high') === 'low');
+
   let output = '\n' + chalk.bold.cyan('═'.repeat(60)) + '\n';
   output += chalk.bold('  CodeDrift Analysis Complete\n');
   output += chalk.bold.cyan('═'.repeat(60)) + '\n';
@@ -25,6 +30,18 @@ export function formatTerminal(result: AnalysisResult, _config: CodeDriftConfig)
   if (issues.length === 0) {
     output += '\n' + chalk.green.bold('  ✓ No issues found! Your code looks clean.\n');
   } else {
+    // Show confidence breakdown
+    output += '\n' + chalk.bold('  Confidence Levels:\n');
+    if (highConfidence.length > 0) {
+      output += `  ${chalk.green('●')} High: ${chalk.bold(highConfidence.length.toString())} issue${highConfidence.length > 1 ? 's' : ''}\n`;
+    }
+    if (mediumConfidence.length > 0) {
+      output += `  ${chalk.yellow('●')} Medium: ${chalk.bold(mediumConfidence.length.toString())} issue${mediumConfidence.length > 1 ? 's' : ''}\n`;
+    }
+    if (lowConfidence.length > 0) {
+      output += `  ${chalk.gray('●')} Low: ${chalk.bold(lowConfidence.length.toString())} issue${lowConfidence.length > 1 ? 's' : ''}\n`;
+    }
+    output += '\n';
     // Show grouped summary
     const sortedEngines = Object.entries(issuesByEngine)
       .sort((a, b) => {
@@ -180,8 +197,11 @@ function getRuleName(engine: string): string {
 function formatIssueSummary(issue: Issue, index: number): string {
   let output = '';
 
+  const confidence = issue.confidence || 'high';
+  const confidenceBadge = getConfidenceBadge(confidence);
+
   const fileLocation = `${issue.filePath}:${issue.location.line}`;
-  output += `  ${chalk.bold(index + '.')} ${chalk.cyan(fileLocation)}\n`;
+  output += `  ${chalk.bold(index + '.')} ${chalk.cyan(fileLocation)} ${confidenceBadge}\n`;
   output += `     ${issue.message}\n`;
 
   if (issue.suggestion) {
@@ -189,6 +209,22 @@ function formatIssueSummary(issue: Issue, index: number): string {
   }
 
   return output;
+}
+
+/**
+ * Get colored confidence badge
+ */
+function getConfidenceBadge(confidence: string): string {
+  switch (confidence) {
+    case 'high':
+      return chalk.green.bold('[HIGH]');
+    case 'medium':
+      return chalk.yellow.bold('[MED]');
+    case 'low':
+      return chalk.gray.bold('[LOW]');
+    default:
+      return '';
+  }
 }
 
 export function formatJSON(result: AnalysisResult, config: CodeDriftConfig): string {

@@ -87,6 +87,9 @@ export class UnsafeRegexDetector extends BaseEngine {
 
   /**
    * Check if regex pattern is unsafe
+   *
+   * Confidence: High - safe-regex2 uses static analysis to detect known ReDoS patterns
+   * The library has high accuracy for detecting exponential time complexity in regex
    */
   private checkPattern(pattern: string, node: ts.Node, context: AnalysisContext): Issue | null {
     // Skip empty patterns
@@ -98,7 +101,7 @@ export class UnsafeRegexDetector extends BaseEngine {
     const result = safeRegex(pattern);
 
     if (!result) {
-      // Pattern is unsafe
+      // Pattern is unsafe - high confidence because safe-regex2 is reliable
       return this.createIssue(
         context,
         node,
@@ -106,6 +109,7 @@ export class UnsafeRegexDetector extends BaseEngine {
         {
           severity: 'error',
           suggestion: 'Simplify regex pattern. Avoid nested quantifiers like (a+)+, (a*)*, or (a+)*',
+          confidence: 'high',
         }
       );
     }

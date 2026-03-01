@@ -173,6 +173,47 @@ Production secrets and file paths visible to attackers
 Fix: Only log stack traces server-side
 ```
 
+## Confidence Levels
+
+CodeDrift assigns confidence levels to every issue to help you prioritize fixes:
+
+- **High**: Clear security vulnerabilities or bugs in production code (fix immediately)
+- **Medium**: Issues in test files or generated code (review and fix)
+- **Low**: Potential false positives or edge cases (investigate when convenient)
+
+Confidence levels are automatically adjusted based on file context:
+
+```typescript
+// src/api/users.ts - HIGH confidence
+app.get('/users/:id', async (req, res) => {
+  const user = await db.users.findById(req.params.id); // IDOR: High confidence
+  res.json(user);
+});
+
+// tests/api.test.ts - MEDIUM confidence (downgraded)
+test('should fetch user', async () => {
+  const user = await db.users.findById('123'); // Same pattern, medium confidence
+});
+
+// dist/bundle.js - MEDIUM confidence (generated file)
+// Generated code automatically gets reduced confidence
+```
+
+### Filtering by Confidence
+
+Use `--confidence-threshold` to filter issues:
+
+```bash
+# Show only high confidence issues
+npx codedrift --confidence-threshold high
+
+# Show high and medium confidence (default)
+npx codedrift --confidence-threshold medium
+
+# Show all issues including low confidence
+npx codedrift --confidence-threshold low
+```
+
 ## Configuration
 
 Create `codedrift.config.json` in your project root:
@@ -196,7 +237,10 @@ Create `codedrift.config.json` in your project root:
     "console-in-production": "warn",
     "empty-catch": "warn"
   },
-  "failOn": "error"
+  "failOn": "error",
+  "excludeTestFiles": false,
+  "confidenceThreshold": "medium",
+  "respectGitignore": true
 }
 ```
 
@@ -204,6 +248,66 @@ Options:
 - `rules.<name>`: Set to "error", "warn", or "off"
 - `failOn`: Exit with code 1 on "error" or "warn"
 - `exclude`: Array of glob patterns to skip
+- `excludeTestFiles`: Skip test files entirely (default: false)
+- `confidenceThreshold`: Minimum confidence level to report ("high", "medium", "low")
+- `respectGitignore`: Honor .gitignore patterns when scanning (default: true)
+
+## Monorepo and Workspace Support
+
+CodeDrift automatically detects and supports monorepo configurations for npm, yarn, and pnpm workspaces.
+
+### Automatic Workspace Detection
+
+```json
+// Root package.json
+{
+  "name": "my-monorepo",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ]
+}
+```
+
+CodeDrift will:
+- Detect workspace packages automatically
+- Resolve dependencies from both workspace and root package.json
+- Include workspace name in error messages for context
+- Handle scoped packages (@org/package) correctly
+
+### Workspace-Aware Error Messages
+
+```bash
+CRITICAL Issues (2)
+
+  packages/api/src/server.ts:15
+  Hallucinated dependency: 'express-rate-limiter' not found in workspace '@myorg/api' package.json
+  Fix: Run 'npm install express-rate-limiter' or remove import if AI hallucinated this package
+
+  apps/web/src/App.tsx:3
+  Hallucinated dependency: 'react-super-hooks' not found in workspace '@myorg/web' package.json
+  Fix: Run 'npm install react-super-hooks' or remove import if AI hallucinated this package
+```
+
+### Supported Workspace Formats
+
+- **npm workspaces**: `"workspaces": ["packages/*"]`
+- **yarn workspaces**: `"workspaces": ["packages/*"]`
+- **pnpm workspaces**: via `pnpm-workspace.yaml`
+- **Lerna**: via `lerna.json` (experimental)
+
+### Running in Monorepos
+
+```bash
+# Run from monorepo root (analyzes all workspaces)
+npx codedrift
+
+# Run in specific workspace
+cd packages/api && npx codedrift
+
+# Exclude specific workspaces
+npx codedrift --exclude "packages/legacy/**"
+```
 
 ## CI/CD Integration
 
@@ -219,7 +323,15 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
-      - run: npx codedrift
+      - run: npx codedrift --confidence-threshold high
+
+  # Advanced: separate jobs for different confidence levels
+  high-priority:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+      - run: npx codedrift --confidence-threshold high --exclude-tests
 ```
 
 ### GitLab CI
@@ -229,7 +341,7 @@ codedrift:
   stage: test
   image: node:18
   script:
-    - npx codedrift --format json --output codedrift-report.json
+    - npx codedrift --format json --output codedrift-report.json --confidence-threshold medium
   artifacts:
     reports:
       codequality: codedrift-report.json
@@ -246,7 +358,7 @@ jobs:
       - image: cimg/node:18.0
     steps:
       - checkout
-      - run: npx codedrift --format json --output report.json
+      - run: npx codedrift --format json --output report.json --confidence-threshold high
       - store_artifacts:
           path: report.json
 ```
@@ -318,21 +430,39 @@ dangerousOperation(); // codedrift-disable-line
 codedrift [options]
 
 Options:
-  --format <type>           Output format: terminal, json, html
-  --output <file>           Write report to file
-  --baseline                Save current issues as baseline
-  --compare-baseline        Show only new issues since baseline
-  --baseline-file <path>    Custom baseline file path
-  --full                    Force full scan, ignore cache
-  -h, --help                Show help
-  -v, --version             Show version
+  --format <type>               Output format: terminal, json, html
+  --output <file>               Write report to file
+  --baseline                    Save current issues as baseline
+  --compare-baseline            Show only new issues since baseline
+  --baseline-file <path>        Custom baseline file path
+  --full                        Force full scan, ignore cache
+  --confidence-threshold <lvl>  Minimum confidence: high, medium, low (default: medium)
+  --exclude-tests              Skip test files entirely
+  -h, --help                    Show help
+  -v, --version                 Show version
 
 Examples:
+  # Basic scan
   codedrift
+
+  # Only show high-confidence issues
+  codedrift --confidence-threshold high
+
+  # Skip test files for faster CI
+  codedrift --exclude-tests --confidence-threshold high
+
+  # Generate HTML report
   codedrift --output report.html
+
+  # Baseline workflow
   codedrift --baseline
   codedrift --compare-baseline
+
+  # JSON for custom processing
   codedrift --format json --output report.json
+
+  # Monorepo: analyze specific workspace
+  cd packages/api && codedrift --confidence-threshold high
 ```
 
 ## How It Works

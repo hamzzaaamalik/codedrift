@@ -36,6 +36,11 @@ export class StackTraceDetector extends BaseEngine {
 
   /**
    * Check if a call expression is a response method with stack trace
+   *
+   * Confidence levels:
+   * - High: Direct error.stack or { stack } in response (clear exposure)
+   * - High: Spreading error object in response { ...error }
+   * - Medium: Passing error variable to response (may be serialized safely)
    */
   private checkResponseCall(node: ts.CallExpression, context: AnalysisContext): Issue | null {
     const { expression } = node;
@@ -61,12 +66,21 @@ export class StackTraceDetector extends BaseEngine {
     }
 
     const arg = node.arguments[0];
-    const hasStackTrace = this.containsStackTrace(arg, context.sourceFile);
+    const stackInfo = this.containsStackTrace(arg, context.sourceFile);
 
-    if (hasStackTrace) {
+    if (stackInfo.hasStack) {
+      // Determine confidence based on how explicit the stack trace exposure is
+      let confidence: 'high' | 'medium' = 'high';
+
+      // Lower confidence for simple error variable (may be custom error handler)
+      if (stackInfo.isSimpleErrorVar && !stackInfo.hasExplicitStack) {
+        confidence = 'medium';
+      }
+
       return this.createIssue(context, node, 'Stack trace exposed in API response', {
         severity: 'error',
         suggestion: 'Use generic error message. Log stack traces server-side only.',
+        confidence,
       });
     }
 
@@ -120,9 +134,16 @@ export class StackTraceDetector extends BaseEngine {
 
   /**
    * Check if argument contains stack trace reference
+   * Returns info about the type of stack trace exposure
    */
-  private containsStackTrace(arg: ts.Expression, _sourceFile: ts.SourceFile): boolean {
+  private containsStackTrace(arg: ts.Expression, _sourceFile: ts.SourceFile): {
+    hasStack: boolean;
+    hasExplicitStack: boolean;
+    isSimpleErrorVar: boolean;
+  } {
     let hasStack = false;
+    let hasExplicitStack = false;
+    let isSimpleErrorVar = false;
 
     const checkNode = (node: ts.Node) => {
       // Check for .stack property access
@@ -132,6 +153,7 @@ export class StackTraceDetector extends BaseEngine {
           const objName = this.getObjectName(node.expression);
           if (objName && this.isErrorVariableName(objName)) {
             hasStack = true;
+            hasExplicitStack = true;
           }
         }
       }
@@ -144,18 +166,21 @@ export class StackTraceDetector extends BaseEngine {
             const propName = this.getPropertyName(prop.name);
             if (propName === 'stack') {
               hasStack = true;
+              hasExplicitStack = true;
             }
 
             // Check property value
             if (ts.isPropertyAccessExpression(prop.initializer)) {
               if (ts.isIdentifier(prop.initializer.name) && prop.initializer.name.text === 'stack') {
                 hasStack = true;
+                hasExplicitStack = true;
               }
             }
           } else if (ts.isShorthandPropertyAssignment(prop)) {
             // Check for { stack } shorthand
             if (ts.isIdentifier(prop.name) && prop.name.text === 'stack') {
               hasStack = true;
+              hasExplicitStack = true;
             }
             // Check for { error } or { err } shorthand
             if (ts.isIdentifier(prop.name) && this.isErrorVariableName(prop.name.text)) {
@@ -170,19 +195,21 @@ export class StackTraceDetector extends BaseEngine {
         const spreadExpr = node.expression;
         if (ts.isIdentifier(spreadExpr) && this.isErrorVariableName(spreadExpr.text)) {
           hasStack = true;
+          hasExplicitStack = true; // Spreading includes all properties including stack
         }
       }
 
       // Check for direct error variable: res.json(err)
       if (ts.isIdentifier(node) && node === arg && this.isErrorVariableName(node.text)) {
         hasStack = true;
+        isSimpleErrorVar = true;
       }
 
       ts.forEachChild(node, checkNode);
     };
 
     checkNode(arg);
-    return hasStack;
+    return { hasStack, hasExplicitStack, isSimpleErrorVar };
   }
 
   /**
@@ -208,6 +235,8 @@ export class StackTraceDetector extends BaseEngine {
 
   /**
    * Check logger calls for stack traces with sensitive data
+   *
+   * Confidence: High when both stack trace and sensitive data are present
    */
   private checkLoggerCall(node: ts.CallExpression, context: AnalysisContext): Issue | null {
     const { expression } = node;
@@ -232,7 +261,8 @@ export class StackTraceDetector extends BaseEngine {
     let hasSensitiveData = false;
 
     for (const arg of node.arguments) {
-      if (this.containsStackTrace(arg, context.sourceFile)) {
+      const stackInfo = this.containsStackTrace(arg, context.sourceFile);
+      if (stackInfo.hasStack) {
         hasStackTrace = true;
       }
       if (this.containsSensitiveData(arg)) {
@@ -247,6 +277,7 @@ export class StackTraceDetector extends BaseEngine {
         {
           severity: 'warning',
           suggestion: 'Avoid logging stack traces with req.body, req.headers, or other sensitive data',
+          confidence: 'high',
         }
       );
     }

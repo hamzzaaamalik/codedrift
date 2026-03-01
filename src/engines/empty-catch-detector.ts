@@ -29,6 +29,13 @@ export class EmptyCatchDetector extends BaseEngine {
 
   /**
    * Check if try-catch has empty or ineffective error handling
+   *
+   * Confidence levels:
+   * - High: Completely empty catch block or only comments (clear bug)
+   * - High: Error variable declared but never used
+   * - Medium: Only has silent return (may be intentional)
+   * - Medium: Only console.log (developer may be aware)
+   * - Low: Useless re-throw (may be placeholder for future logic)
    */
   private checkEmptyCatch(node: ts.TryStatement, context: AnalysisContext): Issue | null {
     const catchClause = node.catchClause;
@@ -44,6 +51,7 @@ export class EmptyCatchDetector extends BaseEngine {
       return this.createIssue(context, catchClause, 'Empty catch block silently swallows errors', {
         severity: 'error',
         suggestion: 'Log error, re-throw, or handle appropriately',
+        confidence: 'high',
       });
     }
 
@@ -52,6 +60,7 @@ export class EmptyCatchDetector extends BaseEngine {
       return this.createIssue(context, catchClause, 'Catch block only contains comments - errors swallowed', {
         severity: 'error',
         suggestion: 'Add error logging or handling logic',
+        confidence: 'high',
       });
     }
 
@@ -60,6 +69,7 @@ export class EmptyCatchDetector extends BaseEngine {
       return this.createIssue(context, catchClause, 'Catch block only returns - error silently ignored', {
         severity: 'warning',
         suggestion: 'Log error before returning',
+        confidence: 'medium',
       });
     }
 
@@ -68,6 +78,7 @@ export class EmptyCatchDetector extends BaseEngine {
       return this.createIssue(context, catchClause, 'Useless catch block - only re-throws without adding context', {
         severity: 'warning',
         suggestion: 'Remove catch or add error context/logging before re-throwing',
+        confidence: 'low', // May be placeholder for future logic
       });
     }
 
@@ -76,6 +87,7 @@ export class EmptyCatchDetector extends BaseEngine {
       return this.createIssue(context, catchClause, 'Catch block only uses console.log - not production-ready', {
         severity: 'warning',
         suggestion: 'Use proper logger and error handling',
+        confidence: 'medium',
       });
     }
 
@@ -84,6 +96,7 @@ export class EmptyCatchDetector extends BaseEngine {
       return this.createIssue(context, catchClause, 'Error caught but never used or logged', {
         severity: 'warning',
         suggestion: 'Use error variable in logging or handling',
+        confidence: 'high',
       });
     }
 

@@ -30,6 +30,7 @@ export class MissingAwaitDetector extends BaseEngine {
 
   /**
    * Check if a call expression is an unawaited async function
+   * Now with multi-level confidence scoring
    */
   private checkMissingAwait(node: ts.CallExpression, context: AnalysisContext): Issue | null {
     // Skip if already awaited
@@ -59,14 +60,67 @@ export class MissingAwaitDetector extends BaseEngine {
       }
     }
 
-    // Check if this call returns a Promise (heuristic-based)
-    if (!this.likelyReturnsPromise(node, context)) {
+    // Get function name for better detection
+    const { expression } = node;
+    let functionName: string | null = null;
+    let objectName: string | null = null;
+
+    if (ts.isIdentifier(expression)) {
+      functionName = expression.text;
+    } else if (ts.isPropertyAccessExpression(expression)) {
+      functionName = expression.name.text;
+      objectName = this.getObjectName(expression.expression);
+    }
+
+    // Skip intentional fire-and-forget patterns
+    if (functionName && this.isIntentionalFireAndForget(functionName, objectName)) {
       return null;
     }
 
-    return this.createIssue(context, node, 'Async function called without await', {
+    // Check if function is declared async (highest confidence)
+    const isDeclaredAsync = functionName ? this.isDeclaredAsAsync(functionName, context) : false;
+
+    // Check if matches async naming patterns (medium confidence)
+    const matchesAsyncPattern = functionName ? this.matchesAsyncPattern(functionName, objectName) : false;
+
+    // Check if return value is used (affects confidence)
+    const returnValueUsed = this.isReturnValueUsed(node);
+
+    // Determine if this is likely an async function
+    let confidence: 'high' | 'medium' | 'low' = 'low';
+    let message = 'Async function called without await';
+    let suggestion = 'Add await or explicitly use void operator for fire-and-forget';
+
+    if (isDeclaredAsync && returnValueUsed) {
+      // HIGH confidence: Declared as async and return value is used
+      confidence = 'high';
+      message = `Async function '${functionName}' called without await`;
+      suggestion = 'Add await to ensure operation completes before continuing';
+    } else if (isDeclaredAsync) {
+      // MEDIUM confidence: Declared as async but return value not used (might be fire-and-forget)
+      confidence = 'medium';
+      message = `Async function '${functionName}' called without await (fire-and-forget?)`;
+      suggestion = 'Add await if operation must complete, or use void operator to make intent clear';
+    } else if (matchesAsyncPattern && returnValueUsed) {
+      // MEDIUM confidence: Matches pattern and return value used
+      confidence = 'medium';
+      message = `Function '${functionName}' appears async but not awaited`;
+      suggestion = 'Add await if this function is actually async';
+    } else if (matchesAsyncPattern) {
+      // LOW confidence: Matches pattern but return value not used
+      confidence = 'low';
+      message = `Function '${functionName}' might be async but not awaited`;
+      suggestion = 'Verify if this function is async and should be awaited';
+      return null; // Skip low confidence fire-and-forget cases
+    } else {
+      // Not enough evidence - skip
+      return null;
+    }
+
+    return this.createIssue(context, node, message, {
       severity: 'error',
-      suggestion: 'Add await or explicitly use void operator for fire-and-forget',
+      confidence,
+      suggestion,
     });
   }
 
@@ -125,9 +179,106 @@ export class MissingAwaitDetector extends BaseEngine {
   }
 
   /**
-   * Heuristic check if call likely returns a Promise
+   * Check if the return value of a call expression is actually used
+   * Returns false for fire-and-forget patterns (standalone statements)
    */
-  private likelyReturnsPromise(node: ts.CallExpression, context: AnalysisContext): boolean {
+  private isReturnValueUsed(node: ts.CallExpression): boolean {
+    const parent = node.parent;
+
+    // Used in variable declaration: const x = asyncFunc()
+    if (parent && ts.isVariableDeclaration(parent)) {
+      return true;
+    }
+
+    // Used in return statement: return asyncFunc()
+    if (parent && ts.isReturnStatement(parent)) {
+      return true;
+    }
+
+    // Used in binary expression: if (asyncFunc()) or x = asyncFunc()
+    if (parent && ts.isBinaryExpression(parent)) {
+      return true;
+    }
+
+    // Used in conditional: condition ? asyncFunc() : other
+    if (parent && ts.isConditionalExpression(parent)) {
+      return true;
+    }
+
+    // Used in array literal: [asyncFunc(), other]
+    if (parent && ts.isArrayLiteralExpression(parent)) {
+      return true;
+    }
+
+    // Used in object literal: { key: asyncFunc() }
+    if (parent && ts.isPropertyAssignment(parent)) {
+      return true;
+    }
+
+    // Used as function argument: someFunc(asyncFunc())
+    if (parent && ts.isCallExpression(parent)) {
+      return true;
+    }
+
+    // Standalone statement (fire-and-forget)
+    if (parent && ts.isExpressionStatement(parent)) {
+      return false;
+    }
+
+    // Default: assume used if we can't determine
+    return true;
+  }
+
+  /**
+   * Check if function name matches common async patterns
+   * More refined than likelyReturnsPromise for better confidence scoring
+   */
+  private matchesAsyncPattern(functionName: string, objectName: string | null): boolean {
+    // Skip known synchronous patterns
+    if (this.isSyncMethod(functionName, objectName)) {
+      return false;
+    }
+
+    // Strong async indicators (common async function prefixes)
+    const strongAsyncPatterns = [
+      /^(fetch|load|save|update|create|delete|remove)$/i,
+      /^(get|set|put|post|patch)Data$/i,
+      /^send[A-Z]/,
+      /^process[A-Z]/,
+      /^execute[A-Z]/,
+      /^run[A-Z]/,
+    ];
+
+    // Weak async indicators (could be sync or async)
+    const weakAsyncPatterns = [
+      /^(get|read|write|query|insert|find|search)$/i,
+    ];
+
+    // Strong pattern match
+    if (strongAsyncPatterns.some(pattern => pattern.test(functionName))) {
+      return true;
+    }
+
+    // Weak pattern match only if not a getter utility
+    if (weakAsyncPatterns.some(pattern => pattern.test(functionName))) {
+      // Exclude obvious sync getters
+      const syncGetterPatterns = [
+        /^get\w+(Name|Type|Value|Label|Text|Key|Id|Index|Count|Length|Size)$/i,
+      ];
+      if (!syncGetterPatterns.some(pattern => pattern.test(functionName))) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Heuristic check if call likely returns a Promise
+   * @deprecated Use matchesAsyncPattern and isDeclaredAsAsync instead
+   */
+  // @ts-expect-error - Unused method kept for backward compatibility
+  private _likelyReturnsPromise(node: ts.CallExpression, context: AnalysisContext): boolean {
     const { expression } = node;
 
     // Get function name and object name

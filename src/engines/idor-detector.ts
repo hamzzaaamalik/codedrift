@@ -41,6 +41,12 @@ export class IDORDetector extends BaseEngine {
 
   /**
    * Check if this is a database query with user-supplied ID without auth check
+   *
+   * Confidence levels:
+   * - High: Direct req.params/req.body usage with known ORM methods (findById, findOne, etc.)
+   * - High: Variable traced back to request params/body
+   * - Medium: Generic variable name like 'id' that likely comes from request
+   * - Low: Query methods like 'where' that may have auth in the WHERE clause
    */
   private checkDatabaseQuery(node: ts.CallExpression, context: AnalysisContext): Issue | null {
     const { expression } = node;
@@ -77,8 +83,8 @@ export class IDORDetector extends BaseEngine {
     }
 
     // Check if using user-supplied ID
-    const usesUserInput = this.usesUserSuppliedId(node);
-    if (!usesUserInput) {
+    const userInputInfo = this.usesUserSuppliedId(node);
+    if (!userInputInfo.isUserInput) {
       return null;
     }
 
@@ -88,6 +94,23 @@ export class IDORDetector extends BaseEngine {
       return null;
     }
 
+    // Determine confidence based on input directness and method specificity
+    let confidence: 'high' | 'medium' | 'low' = 'medium';
+
+    // High confidence: direct req.params/body usage with specific ORM methods
+    if (userInputInfo.isDirect) {
+      const specificMethods = ['findById', 'findByPk', 'findOne', 'findUnique', 'getById'];
+      if (specificMethods.includes(methodName)) {
+        confidence = 'high';
+      }
+    } else if (userInputInfo.isTraced) {
+      // High confidence: traced back to request
+      confidence = 'high';
+    } else if (methodName === 'where' || methodName === 'query' || methodName === 'select') {
+      // Lower confidence for generic query methods (may have WHERE user_id)
+      confidence = 'low';
+    }
+
     return this.createIssue(
       context,
       node,
@@ -95,6 +118,7 @@ export class IDORDetector extends BaseEngine {
       {
         severity: 'error',
         suggestion: 'Add authorization check: verify that the authenticated user owns this resource before fetching it. Example: WHERE id = ? AND user_id = ?',
+        confidence,
       }
     );
   }
@@ -137,29 +161,37 @@ export class IDORDetector extends BaseEngine {
 
   /**
    * Check if query uses user-supplied ID
+   * Returns info about whether it's direct or traced user input
    */
-  private usesUserSuppliedId(node: ts.CallExpression): boolean {
+  private usesUserSuppliedId(node: ts.CallExpression): { isUserInput: boolean; isDirect: boolean; isTraced: boolean } {
     if (!node.arguments || node.arguments.length === 0) {
-      return false;
+      return { isUserInput: false, isDirect: false, isTraced: false };
     }
 
     // Check each argument for user input patterns
     for (const arg of node.arguments) {
       const argText = arg.getText();
 
-      // Direct user input patterns
-      const userInputPatterns = [
+      // Direct user input patterns (req.params, req.body, etc.)
+      const directInputPatterns = [
         /req(uest)?\.params/,
         /req(uest)?\.query/,
         /req(uest)?\.body/,
+      ];
+
+      if (directInputPatterns.some(pattern => pattern.test(argText))) {
+        return { isUserInput: true, isDirect: true, isTraced: false };
+      }
+
+      // Indirect patterns (params., query., body.)
+      const indirectInputPatterns = [
         /params\./,
         /query\./,
         /body\./,
-        /\bid\b/,  // Variable named 'id'
       ];
 
-      if (userInputPatterns.some(pattern => pattern.test(argText))) {
-        return true;
+      if (indirectInputPatterns.some(pattern => pattern.test(argText))) {
+        return { isUserInput: true, isDirect: false, isTraced: false };
       }
 
       // Check if argument is an identifier that might contain user input
@@ -169,13 +201,15 @@ export class IDORDetector extends BaseEngine {
           // Trace back to see if it comes from req.params
           const comesFromRequest = this.tracesBackToRequest(arg, node);
           if (comesFromRequest) {
-            return true;
+            return { isUserInput: true, isDirect: false, isTraced: true };
           }
+          // Even if we can't trace it, 'id' is suspicious
+          return { isUserInput: true, isDirect: false, isTraced: false };
         }
       }
     }
 
-    return false;
+    return { isUserInput: false, isDirect: false, isTraced: false };
   }
 
   /**

@@ -35,6 +35,10 @@ export class AsyncForEachDetector extends BaseEngine {
   /**
    * Check if array method (forEach/map/filter/reduce) is called with async callback
    * These methods don't await their callbacks!
+   *
+   * Confidence levels:
+   * - High: Direct async callback with await inside (clear pattern)
+   * - Medium: Async callback without explicit await (may be intentional)
    */
   private checkArrayMethodWithAsyncCallback(
     node: ts.CallExpression,
@@ -76,6 +80,10 @@ export class AsyncForEachDetector extends BaseEngine {
       return null;
     }
 
+    // Determine confidence based on callback content
+    const hasAwaitInCallback = this.hasAwaitExpression(callback);
+    const confidence = hasAwaitInCallback ? 'high' : 'medium';
+
     // Generate method-specific suggestions
     const suggestion = this.getSuggestion(methodName);
 
@@ -86,8 +94,24 @@ export class AsyncForEachDetector extends BaseEngine {
       {
         severity: 'error',
         suggestion,
+        confidence,
       }
     );
+  }
+
+  /**
+   * Check if function contains await expressions
+   */
+  private hasAwaitExpression(node: ts.Node): boolean {
+    let hasAwait = false;
+
+    traverse(node, (child) => {
+      if (ts.isAwaitExpression(child)) {
+        hasAwait = true;
+      }
+    });
+
+    return hasAwait;
   }
 
   /**

@@ -13,6 +13,7 @@ interface SecretPattern {
   name: string;
   pattern: RegExp;
   severity: 'error' | 'warning';
+  minimumEntropy?: number; // Optional minimum Shannon entropy for detection
 }
 
 export class SecretDetector extends BaseEngine {
@@ -68,7 +69,8 @@ export class SecretDetector extends BaseEngine {
     // { name: 'Azure Client Secret', pattern: /[a-zA-Z0-9~_\-\.]{34,40}/, severity: 'warning' },
     // { name: 'Azure SAS Token', pattern: /sig=[A-Za-z0-9%]+/, severity: 'error' },
     { name: 'Azure Connection String', pattern: /DefaultEndpointsProtocol=https;AccountName=[a-z0-9]+;AccountKey=[A-Za-z0-9+/=]{88}/, severity: 'error' },
-    { name: 'Azure DevOps PAT', pattern: /[a-z0-9]{52}/, severity: 'warning' },
+    // Tightened Azure PAT regex - must be 52 lowercase alphanumeric chars (reduced false positives)
+    { name: 'Azure DevOps PAT', pattern: /^[a-z0-9]{52}$/, severity: 'warning', minimumEntropy: 4.5 },
     // UUIDs are too generic - disabled
     // { name: 'Azure Subscription ID', pattern: /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, severity: 'warning' },
     // { name: 'Azure App ID', pattern: /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, severity: 'warning' },
@@ -172,6 +174,10 @@ export class SecretDetector extends BaseEngine {
     // { name: 'Datadog API Key', pattern: /[a-f0-9]{32}/, severity: 'warning' },
     // { name: 'New Relic License Key', pattern: /[a-f0-9]{40}/, severity: 'error' },
     { name: 'Sentry DSN', pattern: /https:\/\/[a-f0-9]{32}@[a-z0-9\-]+\.ingest\.sentry\.io\/[0-9]+/, severity: 'error' },
+
+    // === Generic High-Entropy Detection ===
+    // Catch-all for unknown secrets based on entropy analysis
+    // Only triggers if no specific pattern matches and entropy is very high
   ];
 
   async analyze(context: AnalysisContext): Promise<Issue[]> {
@@ -186,13 +192,9 @@ export class SecretDetector extends BaseEngine {
         }
       }
 
-      // Check variable declarations for suspicious names with non-env values
-      if (ts.isVariableDeclaration(node)) {
-        const varIssue = this.checkVariableDeclaration(node, context);
-        if (varIssue) {
-          issues.push(varIssue);
-        }
-      }
+      // Note: checkVariableDeclaration() removed to reduce false positives
+      // It was flagging variable names like "apiKey" even when using process.env
+      // Pattern-based detection of string literals is more accurate
     });
 
     return issues;
@@ -200,6 +202,7 @@ export class SecretDetector extends BaseEngine {
 
   /**
    * Check string literal for secret patterns
+   * Enhanced with entropy-based detection for unknown secrets
    */
   private checkStringLiteral(node: ts.StringLiteral, context: AnalysisContext): Issue | null {
     const value = node.text;
@@ -219,64 +222,64 @@ export class SecretDetector extends BaseEngine {
       return null;
     }
 
-    // Check against known patterns
-    for (const { name, pattern, severity } of this.patterns) {
+    // Calculate entropy for advanced detection
+    const entropy = this.calculateEntropy(value);
+
+    // Check against known patterns (with entropy validation if specified)
+    for (const { name, pattern, severity, minimumEntropy } of this.patterns) {
       if (pattern.test(value)) {
-        return this.createIssue(context, node, `Hardcoded secret detected: ${name}`, {
+        // If pattern requires minimum entropy, validate it
+        if (minimumEntropy && entropy < minimumEntropy) {
+          continue; // Skip if entropy too low (likely false positive)
+        }
+
+        // Calculate confidence based on entropy and pattern specificity
+        let confidence: 'high' | 'medium' | 'low' = 'high';
+        if (minimumEntropy) {
+          // Pattern requires entropy check - medium confidence
+          confidence = entropy > minimumEntropy + 0.5 ? 'high' : 'medium';
+        }
+
+        const issue = this.createIssue(context, node, `Hardcoded secret detected: ${name}`, {
           severity,
           suggestion: 'Use environment variables or secret management service',
+          confidence,
         });
+
+        // Add entropy to metadata if issue was created
+        if (issue && issue.metadata) {
+          issue.metadata.entropy = entropy;
+        }
+
+        return issue;
       }
     }
 
-    return null;
-  }
+    // Generic high-entropy detection for unknown secrets
+    // Only flag if: length >= 32, high entropy (> 4.5), no spaces, mixed case
+    if (value.length >= 32 && entropy > 4.5 && !/\s/.test(value)) {
+      // Additional heuristics to reduce false positives
+      const hasUpperCase = /[A-Z]/.test(value);
+      const hasLowerCase = /[a-z]/.test(value);
+      const hasDigits = /[0-9]/.test(value);
+      const hasSpecialChars = /[^a-zA-Z0-9]/.test(value);
 
-  /**
-   * Check variable declaration for suspicious secret-like names
-   */
-  private checkVariableDeclaration(node: ts.VariableDeclaration, context: AnalysisContext): Issue | null {
-    if (!ts.isIdentifier(node.name)) {
-      return null;
-    }
+      // High-entropy string with mixed character types = likely secret
+      const mixedTypes = [hasUpperCase, hasLowerCase, hasDigits, hasSpecialChars].filter(Boolean).length;
 
-    const varName = node.name.text;
-
-    // Check if variable name suggests it's a secret
-    if (!this.isSuspiciousVariableName(varName)) {
-      return null;
-    }
-
-    // Check if it's using process.env (safe)
-    if (node.initializer && this.isEnvVariable(node.initializer)) {
-      return null;
-    }
-
-    // Check if it's a placeholder
-    if (node.initializer && ts.isStringLiteral(node.initializer) && this.isPlaceholder(node.initializer.text)) {
-      return null;
-    }
-
-    // Check if it's empty/null
-    if (node.initializer && this.isEmptyValue(node.initializer)) {
-      return null;
-    }
-
-    // Check if it's a hardcoded string value
-    if (node.initializer && ts.isStringLiteral(node.initializer)) {
-      const value = node.initializer.text;
-
-      // Skip test values
-      if (this.isTestValue(value)) {
-        return null;
-      }
-
-      // Has suspicious name and hardcoded value
-      if (value.length > 8) {  // Only flag if value looks substantial
-        return this.createIssue(context, node, `Suspicious secret in variable: ${varName}`, {
+      if (mixedTypes >= 2) {
+        const issue = this.createIssue(context, node, `Potential secret detected (high entropy: ${entropy.toFixed(2)})`, {
           severity: 'warning',
-          suggestion: 'Use environment variables instead of hardcoding secrets',
+          confidence: 'medium', // Medium confidence for heuristic detection
+          suggestion: 'If this is a secret, use environment variables. Otherwise, add codedrift-ignore comment.',
         });
+
+        // Add entropy to metadata if issue was created
+        if (issue && issue.metadata) {
+          issue.metadata.entropy = entropy;
+        }
+
+        return issue;
       }
     }
 
@@ -284,96 +287,63 @@ export class SecretDetector extends BaseEngine {
   }
 
   /**
-   * Check if variable name suggests it contains a secret
+   * Calculate Shannon entropy of a string
+   * Returns a value between 0 (no randomness) and ~8 (maximum randomness)
+   * High entropy (>4.5) suggests randomness typical of secrets/tokens
+   *
+   * Formula: H(X) = -Σ p(x) * log2(p(x))
+   * where p(x) is the probability of each character
+   *
+   * @param str - String to analyze
+   * @returns Shannon entropy value
    */
-  private isSuspiciousVariableName(name: string): boolean {
-    const lowerName = name.toLowerCase();
-
-    // Known false positives - these are NOT secrets
-    const falsePositivePatterns = [
-      'storage_key',      // localStorage/sessionStorage identifiers
-      'cache_key',        // Cache identifiers
-      'cookie_key',       // Cookie names
-      'local_storage',    // localStorage references
-      'session_storage',  // sessionStorage references
-      'query_key',        // React Query keys
-      'mutation_key',     // React Query mutation keys
-      'redis_key',        // Redis key names (not values)
-      'key_name',         // Generic key name identifiers
-      'key_path',         // Object path keys
-      'sort_key',         // Sorting keys
-      'partition_key',    // Database partition keys
-      'primary_key',      // Database primary keys
-      'foreign_key',      // Database foreign keys
-      'unique_key',       // Database unique keys
-      'index_key',        // Database index keys
-      'encryption_key_id', // Key identifier, not the key itself
-      'public_key',       // Public keys are not secrets
-      'key_id',           // Key identifier references
-      'key_type',         // Key type identifiers
-      'auth_token_name',  // Token field names, not actual tokens
-      'token_type',       // Token type identifiers
-      'token_field',      // Form field names
-    ];
-
-    // If it matches a known false positive pattern, it's not suspicious
-    if (falsePositivePatterns.some(pattern => lowerName.includes(pattern))) {
-      return false;
+  private calculateEntropy(str: string): number {
+    if (str.length === 0) {
+      return 0;
     }
 
-    const suspiciousWords = [
-      'secret', 'password', 'passwd', 'pwd', 'token', 'key',
-      'apikey', 'api_key', 'private', 'credential', 'auth',
-    ];
-
-    return suspiciousWords.some(word => lowerName.includes(word));
-  }
-
-  /**
-   * Check if initializer is process.env access
-   */
-  private isEnvVariable(node: ts.Expression): boolean {
-    // process.env.VAR_NAME
-    if (ts.isPropertyAccessExpression(node)) {
-      const { expression } = node;
-      if (ts.isPropertyAccessExpression(expression)) {
-        return (
-          ts.isIdentifier(expression.expression) &&
-          expression.expression.text === 'process' &&
-          ts.isIdentifier(expression.name) &&
-          expression.name.text === 'env'
-        );
-      }
+    // Count frequency of each character
+    const freq = new Map<string, number>();
+    for (const char of str) {
+      freq.set(char, (freq.get(char) || 0) + 1);
     }
 
-    // process.env['VAR_NAME']
-    if (ts.isElementAccessExpression(node)) {
-      const { expression } = node;
-      if (ts.isPropertyAccessExpression(expression)) {
-        return (
-          ts.isIdentifier(expression.expression) &&
-          expression.expression.text === 'process' &&
-          ts.isIdentifier(expression.name) &&
-          expression.name.text === 'env'
-        );
-      }
+    // Calculate entropy using Shannon's formula
+    let entropy = 0;
+    for (const count of freq.values()) {
+      const p = count / str.length;
+      entropy -= p * Math.log2(p);
     }
 
-    return false;
+    return entropy;
   }
 
   /**
    * Check if value is a placeholder
+   * Comprehensive detection to avoid false positives
    */
   private isPlaceholder(value: string): boolean {
     const placeholderPatterns = [
+      // Explicit placeholder text
       /YOUR_.*_HERE/i,
       /REPLACE.*WITH/i,
       /CHANGE.*THIS/i,
-      /EXAMPLE/i,
       /PLACEHOLDER/i,
       /TODO/i,
-      /XXX/i,
+      /FIXME/i,
+      /XXX+/i,
+      /\[INSERT.*\]/i,
+      /\{.*PLACEHOLDER.*\}/i,
+
+      // Common placeholder patterns
+      /<YOUR.*>/i,
+      /<REPLACE.*>/i,
+      /\$\{.*\}/,  // Template literal placeholders
+      /{{.*}}/,    // Handlebars/Mustache placeholders
+
+      // Generic placeholder strings
+      /^(YOUR|REPLACE|CHANGE|INSERT|ADD|PUT)_/i,
+      /_(HERE|NOW|THIS)$/i,
     ];
 
     return placeholderPatterns.some(pattern => pattern.test(value));
@@ -381,52 +351,32 @@ export class SecretDetector extends BaseEngine {
 
   /**
    * Check if value is for test/dev environment
+   * Enhanced to catch common test patterns
    */
   private isTestValue(value: string): boolean {
     const lowerValue = value.toLowerCase();
-    const testIndicators = ['test', 'dev', 'local', 'demo', 'example', 'sample', 'mock'];
 
-    return testIndicators.some(indicator => lowerValue.includes(indicator));
-  }
+    // Common test indicators
+    const testIndicators = [
+      'test', 'dev', 'local', 'demo', 'example', 'sample', 'mock',
+      'dummy', 'fake', 'stub', 'fixture', 'sandbox',
+    ];
 
-  /**
-   * Check if initializer is empty/null/undefined
-   */
-  private isEmptyValue(node: ts.Expression): boolean {
-    // Empty string
-    if (ts.isStringLiteral(node) && node.text === '') {
+    // Check if value contains test indicators
+    if (testIndicators.some(indicator => lowerValue.includes(indicator))) {
       return true;
     }
 
-    // null
-    if (node.kind === ts.SyntaxKind.NullKeyword) {
-      return true;
+    // Check for repeated patterns (test123, aaaaaaa, 111111)
+    if (/^(.)\1{5,}$/.test(value)) {
+      return true; // Repeated character (likely test data)
     }
 
-    // undefined
-    if (ts.isIdentifier(node) && node.text === 'undefined') {
-      return true;
+    // Check for sequential patterns
+    if (/^(abc|123|xyz)+$/i.test(value)) {
+      return true; // Sequential test pattern
     }
 
     return false;
   }
-
-  /**
-   * Calculate Shannon entropy of a string
-   * High entropy (>4.5) suggests randomness (possible secret)
-   *
-   * Future enhancement: Use this for adaptive secret detection
-   * Example: Check if high-entropy strings (>4.5) are assigned to secret-named variables
-   */
-  // private calculateEntropy(str: string): number {
-  //   if (str.length === 0) return 0;
-  //   const freq = new Map<string, number>();
-  //   for (const char of str) freq.set(char, (freq.get(char) || 0) + 1);
-  //   let entropy = 0;
-  //   for (const count of freq.values()) {
-  //     const p = count / str.length;
-  //     entropy -= p * Math.log2(p);
-  //   }
-  //   return entropy;
-  // }
 }

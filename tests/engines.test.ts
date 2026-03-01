@@ -32,6 +32,8 @@ describe('HallucinatedDepsDetector', () => {
 
     assert.ok(issues.length > 0, 'Should detect hallucinated dependency');
     assert.ok(issues[0]?.message.includes('express-validator-pro'), 'Should mention package name');
+    assert.ok(issues[0]?.confidence, 'Should have confidence field');
+    assert.strictEqual(issues[0]?.confidence, 'high', 'Should have high confidence for production code');
   });
 
   test('should not flag Node.js built-ins', async () => {
@@ -68,6 +70,10 @@ describe('StackTraceDetector', () => {
     const issues = await engine.analyze(context);
 
     assert.ok(issues.length > 0, 'Should detect stack trace exposure');
+    const issue = issues[0];
+    assert.ok(issue, 'Issue should exist');
+    assert.ok(issue.confidence, 'Should have confidence field');
+    assert.strictEqual(issue.confidence, 'high', 'Should have high confidence');
   });
 
   test('should detect shorthand error object', async () => {
@@ -117,6 +123,10 @@ describe('MissingAwaitDetector', () => {
     const issues = await engine.analyze(context);
 
     assert.ok(issues.length > 0, 'Should detect missing await');
+    const issue = issues[0];
+    assert.ok(issue, 'Issue should exist');
+    assert.ok(issue.confidence, 'Should have confidence field');
+    assert.strictEqual(issue.confidence, 'high', 'Should have high confidence');
   });
 
   test('should not flag properly awaited calls', async () => {
@@ -192,6 +202,10 @@ describe('SecretDetector', () => {
     const issues = await engine.analyze(context);
 
     assert.ok(issues.length > 0, 'Should detect Stripe API key');
+    const issue = issues[0];
+    assert.ok(issue, 'Issue should exist');
+    assert.ok(issue.confidence, 'Should have confidence field');
+    assert.strictEqual(issue.confidence, 'high', 'Should have high confidence');
   });
 
   test('should detect GitHub tokens', async () => {

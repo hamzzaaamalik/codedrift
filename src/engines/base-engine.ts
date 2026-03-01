@@ -3,8 +3,9 @@
  * All engines should extend this for consistent behavior
  */
 
-import { AnalysisEngine, AnalysisContext, Issue, Severity } from '../types/index.js';
+import { AnalysisEngine, AnalysisContext, Issue, Severity, Confidence, IssueMetadata } from '../types/index.js';
 import { getLocation } from '../core/parser.js';
+import { isTestFile, isGeneratedFile } from '../utils/file-utils.js';
 import * as ts from 'typescript';
 
 export abstract class BaseEngine implements AnalysisEngine {
@@ -19,6 +20,12 @@ export abstract class BaseEngine implements AnalysisEngine {
   /**
    * Helper to create an issue with consistent formatting
    * Returns null if issue is suppressed by comment
+   *
+   * @param context - Analysis context containing file info
+   * @param node - AST node where issue was found
+   * @param message - Human-readable issue description
+   * @param options - Optional severity, suggestion, confidence, and metadata
+   * @returns Issue object or null if suppressed
    */
   protected createIssue(
     context: AnalysisContext,
@@ -27,6 +34,8 @@ export abstract class BaseEngine implements AnalysisEngine {
     options?: {
       severity?: Severity;
       suggestion?: string;
+      confidence?: Confidence;
+      metadata?: IssueMetadata;
     }
   ): Issue | null {
     const location = getLocation(node, context.sourceFile);
@@ -36,6 +45,25 @@ export abstract class BaseEngine implements AnalysisEngine {
       return null;
     }
 
+    // Build metadata including file categorization
+    const isTest = isTestFile(context.filePath);
+    const isGenerated = isGeneratedFile(context.filePath);
+
+    const metadata: IssueMetadata = {
+      isTestFile: isTest,
+      isGeneratedFile: isGenerated,
+      workspaceName: context.metadata?.workspaceName,
+      ...(options?.metadata || {}),
+    };
+
+    // Determine confidence level with automatic downgrade for test/generated files
+    let confidence = options?.confidence ?? 'high';
+
+    // Automatic confidence downgrade for test/generated files
+    if (isTest || isGenerated) {
+      confidence = this.downgradeConfidence(confidence);
+    }
+
     return {
       engine: this.name,
       severity: options?.severity ?? this.defaultSeverity,
@@ -43,7 +71,26 @@ export abstract class BaseEngine implements AnalysisEngine {
       filePath: context.filePath,
       location,
       suggestion: options?.suggestion,
+      confidence,
+      metadata,
     };
+  }
+
+  /**
+   * Downgrade confidence level by one step
+   * Used for automatic downgrade in test/generated files
+   */
+  private downgradeConfidence(confidence: Confidence): Confidence {
+    switch (confidence) {
+      case 'high':
+        return 'medium';
+      case 'medium':
+        return 'low';
+      case 'low':
+        return 'low'; // Already at lowest
+      default:
+        return 'low';
+    }
   }
 
   /**

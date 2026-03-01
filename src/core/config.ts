@@ -5,7 +5,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { CodeDriftConfig } from '../types/index.js';
+import { CodeDriftConfig, Confidence, Issue } from '../types/index.js';
 
 const DEFAULT_CONFIG: CodeDriftConfig = {
   exclude: [
@@ -33,6 +33,9 @@ const DEFAULT_CONFIG: CodeDriftConfig = {
     enabled: true,
     ttl: 86400000, // 24 hours
   },
+  respectGitignore: true,
+  excludeTestFiles: false,
+  confidenceThreshold: 'low', // Include all issues by default
 };
 
 /**
@@ -101,6 +104,12 @@ function mergeConfig(defaults: CodeDriftConfig, user: Partial<CodeDriftConfig>):
       ...defaults.cache,
       ...user.cache,
     },
+    respectGitignore: user.respectGitignore ?? defaults.respectGitignore,
+    excludeTestFiles: user.excludeTestFiles ?? defaults.excludeTestFiles,
+    confidenceThreshold: user.confidenceThreshold ?? defaults.confidenceThreshold,
+    workspaceRoot: user.workspaceRoot ?? defaults.workspaceRoot,
+    format: user.format ?? defaults.format,
+    output: user.output ?? defaults.output,
   };
 }
 
@@ -130,4 +139,24 @@ export function getRuleSeverity(config: CodeDriftConfig, ruleName: string): 'err
   if (level === 'warn') return 'warning';
 
   return null;
+}
+
+/**
+ * Check if an issue meets the confidence threshold
+ */
+export function meetsConfidenceThreshold(issue: Issue, threshold: Confidence): boolean {
+  // If issue has no confidence, assume high confidence
+  const issueConfidence = issue.confidence || 'high';
+
+  const confidenceLevels: Record<Confidence, number> = {
+    'high': 3,
+    'medium': 2,
+    'low': 1,
+  };
+
+  const issueLevel = confidenceLevels[issueConfidence];
+  const thresholdLevel = confidenceLevels[threshold];
+
+  // Issue passes if its confidence is >= threshold
+  return issueLevel >= thresholdLevel;
 }

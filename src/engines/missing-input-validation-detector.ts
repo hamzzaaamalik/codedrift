@@ -145,6 +145,11 @@ export class MissingInputValidationDetector extends BaseEngine {
 
   /**
    * Check if handler has proper input validation
+   *
+   * Confidence levels:
+   * - High: req.body or req.params without validation (clear vulnerability)
+   * - Medium: req.query without validation (may be optional filters)
+   * - Low: req.headers without validation (sometimes intentionally skipped)
    */
   private checkHandlerValidation(handler: RouteHandler, context: AnalysisContext): Issue[] {
     const issues: Issue[] = [];
@@ -177,6 +182,26 @@ export class MissingInputValidationDetector extends BaseEngine {
 
       // No validation found - flag once per source type
       for (const usage of uniqueUsages) {
+        // Determine confidence based on usage type
+        let confidence: 'high' | 'medium' | 'low' = 'high';
+
+        // req.body without validation is highly likely to be a vulnerability
+        if (usage.source.includes('req.body') || usage.source.includes('@Body()')) {
+          confidence = 'high';
+        }
+        // req.params without validation is also high risk (IDOR, injection)
+        else if (usage.source.includes('req.params') || usage.source.includes('@Param()')) {
+          confidence = 'high';
+        }
+        // req.query might be used for optional filters (lower confidence)
+        else if (usage.source.includes('req.query') || usage.source.includes('@Query()')) {
+          confidence = 'medium';
+        }
+        // req.headers validation is sometimes intentionally skipped
+        else if (usage.source.includes('req.headers')) {
+          confidence = 'low';
+        }
+
         const issue = this.createIssue(
           context,
           usage.node,
@@ -184,6 +209,7 @@ export class MissingInputValidationDetector extends BaseEngine {
           {
             severity: 'error',
             suggestion: `Add input validation using joi, zod, yup, class-validator, or express-validator before using ${usage.source}`,
+            confidence,
           }
         );
         if (issue) {

@@ -10,14 +10,21 @@ import { loadConfig } from './core/config.js';
 import { formatTerminal, formatJSON } from './core/formatter.js';
 import { generateHTMLReport } from './core/html-report.js';
 import { loadBaseline, saveBaseline, filterNewIssues, getDefaultBaselinePath } from './core/baseline.js';
-import type { OutputFormat, AnalysisResult, CodeDriftConfig } from './types/index.js';
+import type { OutputFormat, AnalysisResult, CodeDriftConfig, Confidence } from './types/index.js';
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+// Read version from package.json
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf-8'));
 
 const program = new Command();
 
 program
   .name('codedrift')
   .description('Local-first AI refactoring guardrail for Node.js backends')
-  .version('1.1.0');
+  .version(packageJson.version);
 
 program
   .command('analyze', { isDefault: true })
@@ -29,12 +36,30 @@ program
   .option('--baseline', 'Save current issues as baseline')
   .option('--compare-baseline', 'Show only new issues not in baseline')
   .option('--baseline-file <path>', 'Custom baseline file path')
+  .option('--confidence-threshold <level>', 'Minimum confidence level to report: high, medium, low (default: low)')
+  .option('--exclude-tests', 'Exclude test files from analysis')
   .action(async (options) => {
     const config = loadConfig();
 
     // Override config with CLI options
     const outputFormat: OutputFormat = options.format || config.format || 'terminal';
     const outputFile = options.output || config.output;
+
+    // Apply CLI overrides to config
+    if (options.confidenceThreshold) {
+      const validLevels: Confidence[] = ['high', 'medium', 'low'];
+      const threshold = options.confidenceThreshold.toLowerCase() as Confidence;
+      if (!validLevels.includes(threshold)) {
+        console.error(chalk.red(`Invalid confidence threshold: ${options.confidenceThreshold}`));
+        console.error(chalk.gray('Valid values: high, medium, low'));
+        process.exit(1);
+      }
+      config.confidenceThreshold = threshold;
+    }
+
+    if (options.excludeTests) {
+      config.excludeTestFiles = true;
+    }
 
     const useSpinner = outputFormat === 'terminal' && !outputFile;
     const spinner = useSpinner ? ora('Initializing CodeDrift...').start() : null;
@@ -60,7 +85,7 @@ program
 
       if (options.baseline) {
         // Save baseline
-        saveBaseline(result.issues, baselineFile, '1.1.0');
+        saveBaseline(result.issues, baselineFile, packageJson.version);
         console.log(chalk.green(`✓ Baseline saved to ${baselineFile}`));
         console.log(chalk.gray(`  ${result.issues.length} issues captured as baseline`));
         process.exit(0);

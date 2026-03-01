@@ -1,4 +1,6 @@
 {
+  "$schema": "https://json-schema.org/draft-07/schema#",
+
   "exclude": [
     "node_modules/**",
     "dist/**",
@@ -10,8 +12,13 @@
     "**/*.spec.js",
     "__tests__/**",
     "test/**",
-    "tests/**"
+    "tests/**",
+    ".next/**",
+    "out/**",
+    "__generated__/**",
+    "generated/**"
   ],
+
   "rules": {
     "stack-trace-exposure": "error",
     "hallucinated-deps": "error",
@@ -24,5 +31,21 @@
     "missing-input-validation": "error",
     "idor": "error"
   },
-  "failOn": "error"
+
+  "failOn": "error",
+
+  "excludeTestFiles": false,
+
+  "confidenceThreshold": "medium",
+
+  "respectGitignore": true,
+
+  "cache": {
+    "enabled": true,
+    "ttl": 86400000
+  },
+
+  "format": "terminal",
+
+  "output": null
 }
