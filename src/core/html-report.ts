@@ -13,22 +13,33 @@ interface HTMLReportOptions {
 export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConfig, _options?: HTMLReportOptions): string {
   const { issues, stats, startTime, endTime } = result;
 
-  // Debug: Log issue count before HTML generation
-  console.log(`[HTML Report] Generating report with ${issues.length} issues`);
+  // Debug: Log issue count before HTML generation (only in debug mode)
+  if (process.env.CODEDRIFT_DEBUG) {
+    console.log(`[HTML Report] Generating report with ${issues.length} issues`);
+  }
 
-  const criticalIssues = issues.filter(i => i.severity === 'error');
-  const warnings = issues.filter(i => i.severity === 'warning');
+  // Detect project root from issues (find common path prefix)
+  const projectRoot = detectProjectRoot(issues);
+
+  // Make all file paths relative
+  const relativeIssues = issues.map(issue => ({
+    ...issue,
+    filePath: makeRelativePath(issue.filePath, projectRoot)
+  }));
+
+  const criticalIssues = relativeIssues.filter(i => i.severity === 'error');
+  const warnings = relativeIssues.filter(i => i.severity === 'warning');
   const duration = startTime && endTime ? endTime - startTime : 0;
 
-  const highConfidence = issues.filter(i => (i.confidence || 'high') === 'high');
-  const mediumConfidence = issues.filter(i => (i.confidence || 'high') === 'medium');
-  const lowConfidence = issues.filter(i => (i.confidence || 'high') === 'low');
+  const highConfidence = relativeIssues.filter(i => (i.confidence || 'high') === 'high');
+  const mediumConfidence = relativeIssues.filter(i => (i.confidence || 'high') === 'medium');
+  const lowConfidence = relativeIssues.filter(i => (i.confidence || 'high') === 'low');
 
   // Group issues for top lists
   const issuesByFile = new Map<string, Issue[]>();
   const issuesByEngine = new Map<string, Issue[]>();
 
-  for (const issue of issues) {
+  for (const issue of relativeIssues) {
     // Group by file
     const fileIssues = issuesByFile.get(issue.filePath) || [];
     fileIssues.push(issue);
@@ -1135,7 +1146,7 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
                 </div>
                 <div class="metric-card">
                     <div class="label">Duration</div>
-                    <div class="value neutral">${duration}ms</div>
+                    <div class="value neutral">${(duration / 1000).toFixed(1)}s</div>
                 </div>
             </div>
 
@@ -1229,7 +1240,7 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
                 <div class="section-body">
                     <!-- All Issues (Filtered by JavaScript) -->
                     <div id="issues-list">
-                        ${renderIssuesWithGrouping(issues)}
+                        ${renderIssuesWithGrouping(relativeIssues)}
                     </div>
                 </div>
             </div>
@@ -1253,7 +1264,7 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
         <footer>
             <div class="enhanced-footer">
                 <div>
-                    <p><strong>CodeDrift v1.2.2</strong> - AI Code Safety Guardian</p>
+                    <p><strong>CodeDrift v1.2.3</strong> - AI Code Safety Guardian</p>
                     <p style="margin-top: 4px;">
                         <a href="https://github.com/hamzzaaamalik/codedrift" target="_blank">github.com/hamzzaaamalik/codedrift</a>
                     </p>
@@ -1340,7 +1351,11 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
             const statusText = document.getElementById('filter-status-text');
             if (statusText) {
                 const activeFilters = countActiveFilters();
-                statusText.textContent = 'Showing ' + visibleCount + ' of ' + totalIssues + ' issues' + (activeFilters > 0 ? ' (' + activeFilters + ' filter' + (activeFilters === 1 ? '' : 's') + ' active)' : '');
+                if (filterState.smartFilters.has('critical-only') && visibleCount < totalIssues) {
+                    statusText.textContent = 'Showing ' + visibleCount + ' critical issues — clear filter to see all ' + totalIssues;
+                } else {
+                    statusText.textContent = 'Showing ' + visibleCount + ' of ' + totalIssues + ' issues' + (activeFilters > 0 ? ' (' + activeFilters + ' filter' + (activeFilters === 1 ? '' : 's') + ' active)' : '');
+                }
             }
         }
 
@@ -1450,6 +1465,17 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
         });
 
         document.addEventListener('DOMContentLoaded', function() {
+            // Auto-enable "Critical Only" filter if there are critical issues
+            const criticalCount = document.querySelectorAll('.issue-card[data-severity="error"]').length;
+            if (criticalCount > 0) {
+                filterState.smartFilters.add('critical-only');
+                const criticalBtn = document.querySelector('[data-filter="critical-only"]');
+                if (criticalBtn) {
+                    criticalBtn.classList.add('active');
+                }
+                applyFilters();
+            }
+
             const severityFilter = document.getElementById('filter-severity');
             if (severityFilter) {
                 severityFilter.addEventListener('change', function(e) {
@@ -1517,11 +1543,13 @@ function renderIssuesWithGrouping(issues: Issue[]): string {
     byEngine.set(issue.engine, existing);
   }
 
-  // Identify high-volume groups (50+ issues)
-  const highVolumeThreshold = 50;
+  // Identify high-volume groups (30+ issues OR >40% of total)
+  const highVolumeThreshold = 30;
+  const percentageThreshold = 0.4; // 40% of total issues
   const highVolumeEngines = new Set<string>();
   for (const [engine, engineIssues] of byEngine.entries()) {
-    if (engineIssues.length >= highVolumeThreshold) {
+    const percentage = engineIssues.length / issues.length;
+    if (engineIssues.length >= highVolumeThreshold || percentage >= percentageThreshold) {
       highVolumeEngines.add(engine);
     }
   }
@@ -1548,7 +1576,17 @@ function renderIssuesWithGrouping(issues: Issue[]): string {
   let html = '';
   const renderedEngines = new Set<string>();
 
-  // Render high-volume groups first (collapsed by default)
+  // Separate critical issues from remaining issues
+  const remainingIssues = issues.filter(i => !renderedEngines.has(i.engine));
+  const criticalIssues = remainingIssues.filter(i => i.severity === 'error');
+  const nonCriticalIssues = remainingIssues.filter(i => i.severity !== 'error');
+
+  // Render critical issues FIRST (highest priority, always visible)
+  if (criticalIssues.length > 0) {
+    html += renderIssues(criticalIssues);
+  }
+
+  // Then render high-volume groups (collapsed by default)
   for (const engine of highVolumeEngines) {
     const engineIssues = byEngine.get(engine)!;
     const fileCount = new Set(engineIssues.map(i => i.filePath)).size;
@@ -1571,10 +1609,9 @@ function renderIssuesWithGrouping(issues: Issue[]): string {
     renderedEngines.add(engine);
   }
 
-  // Render remaining issues normally
-  const remainingIssues = issues.filter(i => !renderedEngines.has(i.engine));
-  if (remainingIssues.length > 0) {
-    html += renderIssues(remainingIssues);
+  // Finally render remaining non-critical issues
+  if (nonCriticalIssues.length > 0) {
+    html += renderIssues(nonCriticalIssues);
   }
 
   return html;
@@ -1738,6 +1775,54 @@ function _groupIssuesByConfidence(_issues: Issue[]): Map<string, Issue[]> {
   }
 
   return map;
+}
+
+/**
+ * Detect project root by finding common path prefix across all issues
+ */
+function detectProjectRoot(issues: Issue[]): string {
+  if (issues.length === 0) return '';
+
+  const paths = issues.map(i => i.filePath);
+  if (paths.length === 0) return '';
+
+  // Normalize paths (handle both / and \)
+  const normalizedPaths = paths.map(p => p.replace(/\\/g, '/'));
+
+  // Split into parts
+  const pathParts = normalizedPaths.map(p => p.split('/'));
+
+  // Find common prefix
+  let commonPrefix: string[] = [];
+  const firstPath = pathParts[0];
+
+  for (let i = 0; i < firstPath.length; i++) {
+    const part = firstPath[i];
+    if (pathParts.every(p => p[i] === part)) {
+      commonPrefix.push(part);
+    } else {
+      break;
+    }
+  }
+
+  // Return common prefix as path (exclude filename)
+  return commonPrefix.slice(0, -1).join('/');
+}
+
+/**
+ * Make file path relative to project root
+ */
+function makeRelativePath(filePath: string, projectRoot: string): string {
+  if (!projectRoot) return filePath;
+
+  const normalized = filePath.replace(/\\/g, '/');
+  const rootNormalized = projectRoot.replace(/\\/g, '/');
+
+  if (normalized.startsWith(rootNormalized)) {
+    return normalized.slice(rootNormalized.length + 1); // +1 for trailing slash
+  }
+
+  return filePath;
 }
 
 function escapeHtml(text: string): string {

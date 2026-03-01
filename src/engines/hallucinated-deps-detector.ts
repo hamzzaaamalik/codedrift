@@ -10,6 +10,7 @@ import { BaseEngine } from './base-engine.js';
 import { AnalysisContext, Issue } from '../types/index.js';
 import { getImports, traverse } from '../core/parser.js';
 import { isNodeBuiltin, extractPackageName, isRelativeOrAbsoluteImport } from '../utils/file-utils.js';
+import { checkTyposquat, hasTyposquatPattern } from '../utils/typosquat-detector.js';
 import * as ts from 'typescript';
 
 export class HallucinatedDepsDetector extends BaseEngine {
@@ -59,10 +60,32 @@ export class HallucinatedDepsDetector extends BaseEngine {
       }
 
       if (!exists) {
-        // Build workspace-aware error message
-        let message = `Hallucinated dependency: '${packageName}' not found in package.json`;
-        if (workspaceName) {
-          message = `Hallucinated dependency: '${packageName}' not found in workspace '${workspaceName}' package.json`;
+        // Check if this might be a typosquat of a popular package
+        const typosquatCheck = checkTyposquat(packageName);
+
+        let message: string;
+        let suggestion: string;
+        let confidence: 'high' | 'medium' | 'low' = 'high';
+
+        if (typosquatCheck.isTyposquat && typosquatCheck.targetPackage) {
+          // Typosquat detected - could be a supply chain attack!
+          const hasPattern = hasTyposquatPattern(packageName, typosquatCheck.targetPackage);
+          message = `⚠️ SUPPLY CHAIN RISK: '${packageName}' not found. Did you mean '${typosquatCheck.targetPackage}'? (edit distance: ${typosquatCheck.distance})`;
+
+          if (hasPattern) {
+            suggestion = `🚨 CRITICAL: This looks like a typosquat attack! Replace '${packageName}' with '${typosquatCheck.targetPackage}'. Common typosquats are used for supply chain attacks.`;
+          } else {
+            suggestion = `Replace '${packageName}' with '${typosquatCheck.targetPackage}' or install the correct package. Verify this isn't a malicious typosquat.`;
+          }
+
+          confidence = typosquatCheck.confidence;
+        } else {
+          // Standard hallucinated dependency
+          message = `Hallucinated dependency: '${packageName}' not found in package.json`;
+          if (workspaceName) {
+            message = `Hallucinated dependency: '${packageName}' not found in workspace '${workspaceName}' package.json`;
+          }
+          suggestion = `Run 'npm install ${packageName}' or remove import if AI hallucinated this package`;
         }
 
         // Report the issue with location from parser
@@ -72,13 +95,15 @@ export class HallucinatedDepsDetector extends BaseEngine {
           message,
           filePath: context.filePath,
           location: imp.location,
-          suggestion: `Run 'npm install ${packageName}' or remove import if AI hallucinated this package`,
-          confidence: 'high',
+          suggestion,
+          confidence,
           metadata: {
             isTestFile: context.metadata?.isTestFile || false,
             isGeneratedFile: false,
             workspaceName,
             missingPackage: packageName,
+            typosquatTarget: typosquatCheck.targetPackage || undefined,
+            typosquatDistance: typosquatCheck.isTyposquat ? typosquatCheck.distance : undefined,
           },
         });
       }
@@ -100,20 +125,43 @@ export class HallucinatedDepsDetector extends BaseEngine {
               !isNodeBuiltin(packageName) &&
               !exists) {
 
-            let message = `Hallucinated dependency in dynamic import: '${packageName}' not found`;
-            if (workspaceName) {
-              message = `Hallucinated dependency in dynamic import: '${packageName}' not found in workspace '${workspaceName}'`;
+            // Check for typosquat
+            const typosquatCheck = checkTyposquat(packageName);
+
+            let message: string;
+            let suggestion: string;
+            let confidence: 'high' | 'medium' | 'low' = 'high';
+
+            if (typosquatCheck.isTyposquat && typosquatCheck.targetPackage) {
+              const hasPattern = hasTyposquatPattern(packageName, typosquatCheck.targetPackage);
+              message = `⚠️ SUPPLY CHAIN RISK in dynamic import: '${packageName}' not found. Did you mean '${typosquatCheck.targetPackage}'?`;
+
+              if (hasPattern) {
+                suggestion = `🚨 CRITICAL: Typosquat attack detected! Replace '${packageName}' with '${typosquatCheck.targetPackage}'`;
+              } else {
+                suggestion = `Replace '${packageName}' with '${typosquatCheck.targetPackage}' or install the correct package`;
+              }
+
+              confidence = typosquatCheck.confidence;
+            } else {
+              message = `Hallucinated dependency in dynamic import: '${packageName}' not found`;
+              if (workspaceName) {
+                message = `Hallucinated dependency in dynamic import: '${packageName}' not found in workspace '${workspaceName}'`;
+              }
+              suggestion = `Install ${packageName} or remove dynamic import`;
             }
 
             const issue = this.createIssue(context, node, message, {
               severity: 'error',
-              confidence: 'high',
-              suggestion: `Install ${packageName} or remove dynamic import`,
+              confidence,
+              suggestion,
               metadata: {
                 isTestFile: context.metadata?.isTestFile || false,
                 isGeneratedFile: false,
                 workspaceName,
                 missingPackage: packageName,
+                typosquatTarget: typosquatCheck.targetPackage || undefined,
+                typosquatDistance: typosquatCheck.isTyposquat ? typosquatCheck.distance : undefined,
               },
             });
 
