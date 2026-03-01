@@ -237,8 +237,8 @@ program
       } else {
         console.log(outputContent);
 
-        // Interactive: Ask if user wants HTML report (only in terminal mode with issues)
-        if (finalFormat === 'terminal' && issuesToReport.length > 0) {
+        // Interactive: Ask if user wants HTML report (not for json/html output)
+        if (!ci && finalFormat !== 'json' && finalFormat !== 'html' && issuesToReport.length > 0) {
           await promptForHTMLReport(reportResult, config);
         }
       }

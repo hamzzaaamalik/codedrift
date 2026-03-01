@@ -26,6 +26,40 @@ export function shouldAutoIgnore(issue: Issue): boolean {
     return true;
   }
 
+  // Low-priority IDOR issues (authenticated routes, internal APIs)
+  if (isLowPriorityIDOR(issue)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if IDOR/validation issue is low priority
+ * Internal routes, authenticated-only routes are lower risk
+ */
+function isLowPriorityIDOR(issue: Issue): boolean {
+  if (issue.engine !== 'idor' && !issue.message.toLowerCase().includes('validation')) {
+    return false;
+  }
+
+  const filePath = issue.filePath.toLowerCase();
+
+  // Internal API routes (not public-facing)
+  if (filePath.includes('/internal/') || filePath.includes('/admin/')) {
+    return true; // Admin routes usually have auth middleware
+  }
+
+  // Health checks, metrics endpoints
+  if (filePath.includes('/health') || filePath.includes('/metrics') || filePath.includes('/status')) {
+    return true;
+  }
+
+  // Only flag high-confidence validation issues
+  if (issue.confidence !== 'high') {
+    return true; // Skip medium/low confidence IDOR
+  }
+
   return false;
 }
 

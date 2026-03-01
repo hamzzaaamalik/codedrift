@@ -316,12 +316,6 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
             padding: 64px 24px;
         }
 
-        .no-issues .icon {
-            font-size: 48px;
-            color: #10b981;
-            margin-bottom: 16px;
-        }
-
         .no-issues h3 {
             font-size: 18px;
             font-weight: 600;
@@ -410,12 +404,12 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
 
         /* Executive Summary Dashboard Styles */
         .executive-summary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            color: #1f2937;
             padding: 32px;
             border-radius: 12px;
             margin-bottom: 32px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
 
         .executive-summary h2 {
@@ -435,16 +429,15 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
         }
 
         .summary-stat-card {
-            background: rgba(255,255,255,0.15);
-            backdrop-filter: blur(10px);
+            background: #ffffff;
             border-radius: 8px;
             padding: 16px;
-            border: 1px solid rgba(255,255,255,0.2);
+            border: 1px solid #e5e7eb;
         }
 
         .summary-stat-card .stat-label {
             font-size: 12px;
-            opacity: 0.9;
+            color: #6b7280;
             margin-bottom: 8px;
             text-transform: uppercase;
             letter-spacing: 0.05em;
@@ -453,6 +446,7 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
         .summary-stat-card .stat-value {
             font-size: 28px;
             font-weight: 700;
+            color: #1f2937;
         }
 
         .top-issues-grid {
@@ -462,18 +456,17 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
         }
 
         .top-list {
-            background: rgba(255,255,255,0.15);
-            backdrop-filter: blur(10px);
+            background: #ffffff;
             border-radius: 8px;
             padding: 20px;
-            border: 1px solid rgba(255,255,255,0.2);
+            border: 1px solid #e5e7eb;
         }
 
         .top-list h3 {
             font-size: 14px;
             font-weight: 600;
             margin-bottom: 16px;
-            opacity: 0.9;
+            color: #111827;
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
@@ -483,7 +476,7 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
             justify-content: space-between;
             align-items: center;
             padding: 10px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
+            border-bottom: 1px solid #e5e7eb;
         }
 
         .top-item:last-child {
@@ -492,6 +485,7 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
 
         .top-item-name {
             font-size: 13px;
+            color: #1f2937;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -502,14 +496,15 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
         .top-item-count {
             font-weight: 700;
             font-size: 16px;
-            background: rgba(255,255,255,0.2);
+            background: #f3f4f6;
+            color: #1f2937;
             padding: 4px 12px;
             border-radius: 12px;
         }
 
         /* Progress Bar Styles */
         .progress-bar {
-            background: rgba(255,255,255,0.2);
+            background: #e5e7eb;
             height: 8px;
             border-radius: 4px;
             overflow: hidden;
@@ -518,7 +513,7 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
 
         .progress-fill {
             height: 100%;
-            background: rgba(255,255,255,0.8);
+            background: #3b82f6;
             transition: width 0.3s ease;
         }
 
@@ -645,7 +640,7 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
 
         .search-box input {
             width: 100%;
-            padding: 10px 40px 10px 40px;
+            padding: 10px 16px;
             border: 2px solid #e5e7eb;
             border-radius: 8px;
             font-size: 14px;
@@ -656,15 +651,6 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
             outline: none;
             border-color: #3b82f6;
             box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-        }
-
-        .search-icon {
-            position: absolute;
-            left: 12px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: #9ca3af;
-            font-size: 16px;
         }
 
         /* Enhanced Issue Cards */
@@ -706,15 +692,6 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
             font-weight: 600;
             color: #111827;
             margin-bottom: 6px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
-        .severity-icon {
-            font-size: 16px;
-            line-height: 1;
         }
 
         .issue-card-meta {
@@ -724,11 +701,6 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
             align-items: center;
             gap: 12px;
             flex-wrap: wrap;
-        }
-
-        .confidence-stars {
-            color: #f59e0b;
-            letter-spacing: 1px;
         }
 
         .issue-card-expand {
@@ -1015,14 +987,14 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
     <div class="container">
         <header>
             <div class="header-left">
-                <h1>🛡️ CodeDrift Security Report</h1>
+                <h1>CodeDrift Security Report</h1>
                 <p class="subtitle">AI Code Safety Analysis</p>
             </div>
             <div class="header-right">
                 <p class="timestamp">Generated: ${new Date().toLocaleString()}</p>
                 ${criticalIssues.length > 0
-                    ? '<p style="color: #dc2626; font-weight: 600; font-size: 14px; margin-top: 4px;">⚠️ Critical Issues Found</p>'
-                    : '<p style="color: #10b981; font-weight: 600; font-size: 14px; margin-top: 4px;">✓ All Clear</p>'
+                    ? '<p style="color: #dc2626; font-weight: 600; font-size: 14px; margin-top: 4px;">Critical Issues Found</p>'
+                    : '<p style="color: #10b981; font-weight: 600; font-size: 14px; margin-top: 4px;">All Clear</p>'
                 }
             </div>
         </header>
@@ -1052,14 +1024,14 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
 
                 <div class="summary-stats">
                     <div class="summary-stat-card">
-                        <div class="stat-label">🔴 Critical</div>
+                        <div class="stat-label">Critical</div>
                         <div class="stat-value">${criticalIssues.length}</div>
                         <div class="progress-bar">
                             <div class="progress-fill" style="width: ${issues.length ? (criticalIssues.length / issues.length * 100) : 0}%"></div>
                         </div>
                     </div>
                     <div class="summary-stat-card">
-                        <div class="stat-label">🟡 Warnings</div>
+                        <div class="stat-label">Warnings</div>
                         <div class="stat-value">${warnings.length}</div>
                         <div class="progress-bar">
                             <div class="progress-fill" style="width: ${issues.length ? (warnings.length / issues.length * 100) : 0}%"></div>
@@ -1146,7 +1118,6 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
             <div class="section">
                 <div class="section-body">
                     <div class="no-issues">
-                        <div class="icon">✓</div>
                         <h3>No Issues Found</h3>
                         <p>Your code passed all security and quality checks.</p>
                     </div>
@@ -1155,10 +1126,9 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
             ` : `
             <!-- Filter Controls -->
             <div class="filter-controls">
-                <h3>🔍 Filter & Search</h3>
+                <h3>Filter & Search</h3>
 
                 <div class="search-box">
-                    <span class="search-icon">🔎</span>
                     <input type="text" id="issue-search" placeholder="Search issues by message, file, or engine...">
                 </div>
 
@@ -1167,17 +1137,17 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
                         <label>Severity</label>
                         <select id="filter-severity">
                             <option value="all">All</option>
-                            <option value="error">🔴 Critical</option>
-                            <option value="warning">🟡 Warning</option>
+                            <option value="error">Critical</option>
+                            <option value="warning">Warning</option>
                         </select>
                     </div>
                     <div class="filter-group">
                         <label>Confidence</label>
                         <select id="filter-confidence">
                             <option value="all">All</option>
-                            <option value="high">⭐⭐⭐ High</option>
-                            <option value="medium">⭐⭐ Medium</option>
-                            <option value="low">⭐ Low</option>
+                            <option value="high">High</option>
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
                         </select>
                     </div>
                     <div class="filter-group">
@@ -1221,10 +1191,10 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
 
             <!-- Action Buttons -->
             <div class="action-buttons">
-                <button class="action-btn primary" onclick="window.print()">📄 Export to PDF</button>
-                <button class="action-btn" onclick="exportToCSV()">📊 Export to CSV</button>
-                <button class="action-btn" onclick="expandAll()">⬇️ Expand All</button>
-                <button class="action-btn" onclick="collapseAll()">⬆️ Collapse All</button>
+                <button class="action-btn primary" onclick="window.print()">Export to PDF</button>
+                <button class="action-btn" onclick="exportToCSV()">Export to CSV</button>
+                <button class="action-btn" onclick="expandAll()">Expand All</button>
+                <button class="action-btn" onclick="collapseAll()">Collapse All</button>
             </div>
 
             <div class="section">
@@ -1579,15 +1549,6 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
 function renderIssues(issues: Issue[]): string {
   return issues.map((issue, index) => {
     const confidence = issue.confidence || 'high';
-    const severityIcons: Record<string, string> = {
-      'error': '🔴',
-      'warning': '🟡'
-    };
-    const confidenceStars: Record<string, string> = {
-      'high': '⭐⭐⭐',
-      'medium': '⭐⭐',
-      'low': '⭐'
-    };
     const engineNames: Record<string, string> = {
       'idor': 'Insecure Direct Object Reference',
       'missing-input-validation': 'Missing Input Validation',
@@ -1606,12 +1567,11 @@ function renderIssues(issues: Issue[]): string {
         <div class="issue-card-header" onclick="toggleIssueCard(this)">
             <div class="issue-card-left">
                 <div class="issue-card-title">
-                    <span class="severity-icon">${severityIcons[issue.severity] || '🔵'}</span>
                     ${escapeHtml(issue.message)}
                 </div>
                 <div class="issue-card-meta">
                     <span class="issue-badge badge-${issue.severity}">${issue.severity.toUpperCase()}</span>
-                    <span class="confidence-stars" title="${confidence} confidence">${confidenceStars[confidence]}</span>
+                    <span class="badge-confidence badge-${confidence}">${confidence.toUpperCase()}</span>
                     ${issue.riskScore !== undefined ? `<span class="risk-badge risk-${issue.priority || 'low'}">Risk: ${issue.riskScore}/100</span>` : ''}
                     <span>${escapeHtml(issue.filePath)}:${issue.location.line}</span>
                     <span>•</span>
@@ -1625,12 +1585,12 @@ function renderIssues(issues: Issue[]): string {
             <div><strong>Line:</strong> ${issue.location.line}</div>
             <div><strong>Engine:</strong> ${engineNames[issue.engine] || issue.engine}</div>
             <div><strong>Severity:</strong> ${issue.severity.toUpperCase()}</div>
-            <div><strong>Confidence:</strong> ${confidence} ${confidenceStars[confidence]}</div>
+            <div><strong>Confidence:</strong> ${confidence.toUpperCase()}</div>
             ${issue.riskScore !== undefined ? `<div><strong>Risk Score:</strong> ${issue.riskScore}/100 (${issue.priority?.toUpperCase() || 'LOW'} priority)</div>` : ''}
             ${issue.suggestion ? `
             <div class="suggestion-box">
                 <div class="suggestion-box-header">
-                    <span class="suggestion-label">💡 Suggestion</span>
+                    <span class="suggestion-label">Suggestion</span>
                     <button class="copy-btn" onclick="copyToClipboard(this, ${index})">Copy</button>
                 </div>
                 <div class="suggestion-text" data-suggestion="${escapeHtml(issue.suggestion).replace(/"/g, '&quot;')}">${escapeHtml(issue.suggestion)}</div>

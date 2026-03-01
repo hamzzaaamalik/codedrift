@@ -42,7 +42,7 @@ const DEFAULT_CONFIG: CodeDriftConfig = {
   },
   respectGitignore: true,
   excludeTestFiles: true, // ✅ CHANGED: Skip test files by default to reduce noise
-  confidenceThreshold: 'medium', // ✅ CHANGED: Skip low-confidence noise by default
+  confidenceThreshold: 'high', // ✅ CHANGED: Only show high-confidence issues by default (maximum noise reduction)
 };
 
 /**

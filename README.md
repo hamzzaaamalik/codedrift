@@ -230,16 +230,16 @@ Create `codedrift.config.json` in your project root:
     "missing-input-validation": "error",
     "hardcoded-secret": "error",
     "stack-trace-exposure": "error",
-    "missing-await": "error",
+    "missing-await": "warn",
     "async-foreach": "error",
-    "hallucinated-deps": "error",
+    "hallucinated-deps": "warn",
     "unsafe-regex": "error",
     "console-in-production": "warn",
     "empty-catch": "warn"
   },
   "failOn": "error",
-  "excludeTestFiles": false,
-  "confidenceThreshold": "medium",
+  "excludeTestFiles": true,
+  "confidenceThreshold": "high",
   "respectGitignore": true
 }
 ```
@@ -248,8 +248,8 @@ Options:
 - `rules.<name>`: Set to "error", "warn", or "off"
 - `failOn`: Exit with code 1 on "error" or "warn"
 - `exclude`: Array of glob patterns to skip
-- `excludeTestFiles`: Skip test files entirely (default: false)
-- `confidenceThreshold`: Minimum confidence level to report ("high", "medium", "low")
+- `excludeTestFiles`: Skip test files entirely (default: true)
+- `confidenceThreshold`: Minimum confidence level to report ("high", "medium", "low", default: "high")
 - `respectGitignore`: Honor .gitignore patterns when scanning (default: true)
 
 ## Monorepo and Workspace Support
@@ -430,14 +430,14 @@ dangerousOperation(); // codedrift-disable-line
 codedrift [options]
 
 Options:
-  --format <type>               Output format: terminal, json, html
+  --format <type>               Output format: summary, detailed, compact, json, html
   --output <file>               Write report to file
   --baseline                    Save current issues as baseline
   --compare-baseline            Show only new issues since baseline
   --baseline-file <path>        Custom baseline file path
   --full                        Force full scan, ignore cache
-  --confidence-threshold <lvl>  Minimum confidence: high, medium, low (default: medium)
-  --exclude-tests              Skip test files entirely
+  --confidence-threshold <lvl>  Minimum confidence: high, medium, low (default: high)
+  --exclude-tests               Skip test files entirely (default: true)
   -h, --help                    Show help
   -v, --version                 Show version
 
