@@ -162,17 +162,43 @@ export class PackageResolver implements IPackageResolver {
 
     // CRITICAL FIX: Check if file is IN the package being imported (self-import scenario)
     // This prevents false positives for workspace self-imports (e.g., openclaw importing openclaw)
+
+    // Strategy 1: Check workspace name (for monorepos)
     const fileWorkspace = this.getWorkspaceName(filePath);
+    if (fileWorkspace && fileWorkspace === name) {
+      return true;
+    }
+
+    // Strategy 2: Check nearest package.json to the file (for regular projects)
+    // This handles cases where the project imports itself (e.g., openclaw importing openclaw)
+    const nearestPkg = this.findNearestPackageJson(filePath);
+    if (nearestPkg && nearestPkg !== this.packageJsonPath) {
+      try {
+        let pkgJson: PackageJson;
+        if (this.packageJsonCache.has(nearestPkg)) {
+          pkgJson = this.packageJsonCache.get(nearestPkg)!;
+        } else {
+          pkgJson = this.loadPackageJson(nearestPkg);
+          this.packageJsonCache.set(nearestPkg, pkgJson);
+        }
+
+        // If the nearest package.json has the same name as the import, it's a self-import
+        if (pkgJson.name === name) {
+          if (process.env.CODEDRIFT_DEBUG) {
+            console.log(`[PackageResolver] ✅ Self-import detected: ${name} matches nearest package.json`);
+          }
+          return true;
+        }
+      } catch (error) {
+        // Ignore errors loading package.json
+      }
+    }
 
     // Debug logging for workspace resolution
     if (process.env.CODEDRIFT_DEBUG) {
       console.log(`[PackageResolver] Checking ${name} for file ${filePath}`);
-      console.log(`[PackageResolver] File workspace: ${fileWorkspace}`);
-      console.log(`[PackageResolver] Self-import match: ${fileWorkspace === name}`);
-    }
-
-    if (fileWorkspace && fileWorkspace === name) {
-      return true;
+      console.log(`[PackageResolver] File workspace: ${fileWorkspace || 'none'}`);
+      console.log(`[PackageResolver] Nearest pkg: ${nearestPkg}`);
     }
 
     // Check if it's a workspace package (global workspace check)

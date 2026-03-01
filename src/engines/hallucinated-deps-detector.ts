@@ -50,6 +50,14 @@ export class HallucinatedDepsDetector extends BaseEngine {
         ? packageResolver.packageExistsForFile(packageName, context.filePath)
         : packageResolver.packageExists(packageName);
 
+      // Debug: Log the first 5 failures to help diagnose workspace issues
+      if (!exists && process.env.CODEDRIFT_DEBUG) {
+        console.log(`[Hallucinated] Package not found: "${packageName}"`);
+        console.log(`[Hallucinated] File: ${context.filePath}`);
+        console.log(`[Hallucinated] Workspace: ${workspaceName || 'none'}`);
+        console.log('---');
+      }
+
       if (!exists) {
         // Build workspace-aware error message
         let message = `Hallucinated dependency: '${packageName}' not found in package.json`;
