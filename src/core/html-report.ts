@@ -13,16 +13,32 @@ interface HTMLReportOptions {
 export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConfig, _options?: HTMLReportOptions): string {
   const { issues, stats, startTime, endTime } = result;
 
+  // Debug: Log issue count before HTML generation
+  console.log(`[HTML Report] Generating report with ${issues.length} issues`);
+
   const criticalIssues = issues.filter(i => i.severity === 'error');
   const warnings = issues.filter(i => i.severity === 'warning');
   const duration = startTime && endTime ? endTime - startTime : 0;
 
-  const issuesByFile = groupIssuesByFile(issues);
-  const issuesByEngine = groupIssuesByEngine(issues);
-
   const highConfidence = issues.filter(i => (i.confidence || 'high') === 'high');
   const mediumConfidence = issues.filter(i => (i.confidence || 'high') === 'medium');
   const lowConfidence = issues.filter(i => (i.confidence || 'high') === 'low');
+
+  // Group issues for top lists
+  const issuesByFile = new Map<string, Issue[]>();
+  const issuesByEngine = new Map<string, Issue[]>();
+
+  for (const issue of issues) {
+    // Group by file
+    const fileIssues = issuesByFile.get(issue.filePath) || [];
+    fileIssues.push(issue);
+    issuesByFile.set(issue.filePath, fileIssues);
+
+    // Group by engine
+    const engineIssues = issuesByEngine.get(issue.engine) || [];
+    engineIssues.push(issue);
+    issuesByEngine.set(issue.engine, engineIssues);
+  }
 
   // Calculate top problematic files
   const topFiles = Array.from(issuesByFile.entries())
@@ -154,37 +170,6 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
             padding: 24px;
         }
 
-        .filter-tabs {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 24px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 16px;
-        }
-
-        .filter-tab {
-            padding: 8px 16px;
-            background: transparent;
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 13px;
-            font-weight: 500;
-            color: #6b7280;
-            transition: all 0.15s;
-        }
-
-        .filter-tab:hover {
-            border-color: #d1d5db;
-            background: #f9fafb;
-        }
-
-        .filter-tab.active {
-            background: #3b82f6;
-            color: white;
-            border-color: #3b82f6;
-        }
-
         .issue {
             border-left: 3px solid #dc2626;
             padding: 16px;
@@ -284,14 +269,6 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
         .risk-low {
             background: #0366d6;
             color: white;
-        }
-
-        .view-container {
-            display: none;
-        }
-
-        .view-container.active {
-            display: block;
         }
 
         .issue-message {
@@ -1202,80 +1179,9 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
                     <h2>Issues</h2>
                 </div>
                 <div class="section-body">
-                    <div class="filter-tabs">
-                        <button class="filter-tab active" onclick="showView('all')">All (${issues.length})</button>
-                        <button class="filter-tab" onclick="showView('severity')">By Severity</button>
-                        <button class="filter-tab" onclick="showView('file')">By File</button>
-                        <button class="filter-tab" onclick="showView('engine')">By Engine</button>
-                        <button class="filter-tab" onclick="showView('confidence')">By Confidence</button>
-                    </div>
-
-                    <!-- View: All Issues -->
-                    <div id="view-all" class="view-container active">
+                    <!-- All Issues (Filtered by JavaScript) -->
+                    <div id="issues-list">
                         ${renderIssues(issues)}
-                    </div>
-
-                    <!-- View: By Severity -->
-                    <div id="view-severity" class="view-container">
-                        ${criticalIssues.length > 0 ? `
-                        <div class="file-group">
-                            <div class="file-group-header">
-                                <span>Critical Issues</span>
-                                <span class="file-count">${criticalIssues.length} issue${criticalIssues.length === 1 ? '' : 's'}</span>
-                            </div>
-                            ${renderIssues(criticalIssues)}
-                        </div>
-                        ` : ''}
-                        ${warnings.length > 0 ? `
-                        <div class="file-group">
-                            <div class="file-group-header">
-                                <span>Warnings</span>
-                                <span class="file-count">${warnings.length} issue${warnings.length === 1 ? '' : 's'}</span>
-                            </div>
-                            ${renderIssues(warnings)}
-                        </div>
-                        ` : ''}
-                    </div>
-
-                    <!-- View: By File -->
-                    <div id="view-file" class="view-container">
-                        ${renderIssuesByFile(issuesByFile)}
-                    </div>
-
-                    <!-- View: By Engine -->
-                    <div id="view-engine" class="view-container">
-                        ${renderIssuesByEngine(issuesByEngine)}
-                    </div>
-
-                    <!-- View: By Confidence -->
-                    <div id="view-confidence" class="view-container">
-                        ${highConfidence.length > 0 ? `
-                        <div class="file-group">
-                            <div class="file-group-header">
-                                <span>High Confidence</span>
-                                <span class="file-count">${highConfidence.length} issue${highConfidence.length === 1 ? '' : 's'}</span>
-                            </div>
-                            ${renderIssues(highConfidence)}
-                        </div>
-                        ` : ''}
-                        ${mediumConfidence.length > 0 ? `
-                        <div class="file-group">
-                            <div class="file-group-header">
-                                <span>Medium Confidence</span>
-                                <span class="file-count">${mediumConfidence.length} issue${mediumConfidence.length === 1 ? '' : 's'}</span>
-                            </div>
-                            ${renderIssues(mediumConfidence)}
-                        </div>
-                        ` : ''}
-                        ${lowConfidence.length > 0 ? `
-                        <div class="file-group">
-                            <div class="file-group-header">
-                                <span>Low Confidence</span>
-                                <span class="file-count">${lowConfidence.length} issue${lowConfidence.length === 1 ? '' : 's'}</span>
-                            </div>
-                            ${renderIssues(lowConfidence)}
-                        </div>
-                        ` : ''}
                     </div>
                 </div>
             </div>
@@ -1299,7 +1205,7 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
         <footer>
             <div class="enhanced-footer">
                 <div>
-                    <p><strong>CodeDrift v1.1.4</strong> - AI Code Safety Guardian</p>
+                    <p><strong>CodeDrift v1.1.8</strong> - AI Code Safety Guardian</p>
                     <p style="margin-top: 4px;">
                         <a href="https://github.com/hamzzaaamalik/codedrift" target="_blank">github.com/hamzzaaamalik/codedrift</a>
                     </p>
@@ -1325,17 +1231,6 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
             smartFilters: new Set()
         };
         const totalIssues = ${issues.length};
-
-        function showView(viewName) {
-            const views = document.querySelectorAll('.view-container');
-            views.forEach(view => view.classList.remove('active'));
-            const selectedView = document.getElementById('view-' + viewName);
-            if (selectedView) selectedView.classList.add('active');
-            const tabs = document.querySelectorAll('.filter-tab');
-            tabs.forEach(tab => tab.classList.remove('active'));
-            event.target.classList.add('active');
-            applyFilters();
-        }
 
         function toggleIssueCard(header) {
             header.closest('.issue-card').classList.toggle('expanded');
@@ -1602,7 +1497,9 @@ function renderIssues(issues: Issue[]): string {
   }).join('');
 }
 
-function renderIssuesByFile(issuesByFile: Map<string, Issue[]>): string {
+// Removed: render functions for views (caused 5x multiplier bug)
+// @ts-expect-error - Unused function, kept for potential future use
+function _renderIssuesByFile(issuesByFile: Map<string, Issue[]>): string {
   const entries = Array.from(issuesByFile.entries()).sort((a, b) => b[1].length - a[1].length);
 
   return entries.map(([file, issues]) => `
@@ -1616,7 +1513,8 @@ function renderIssuesByFile(issuesByFile: Map<string, Issue[]>): string {
   `).join('');
 }
 
-function renderIssuesByEngine(issuesByEngine: Map<string, Issue[]>): string {
+// @ts-expect-error - Unused function, kept for potential future use
+function _renderIssuesByEngine(issuesByEngine: Map<string, Issue[]>): string {
   // Prioritize by danger level, not just count
   const priority: Record<string, number> = {
     'idor': 1,
@@ -1662,7 +1560,8 @@ function renderIssuesByEngine(issuesByEngine: Map<string, Issue[]>): string {
   `).join('');
 }
 
-function groupIssuesByFile(issues: Issue[]): Map<string, Issue[]> {
+// @ts-expect-error - Unused function, kept for potential future use
+function _groupIssuesByFile(issues: Issue[]): Map<string, Issue[]> {
   const map = new Map<string, Issue[]>();
 
   for (const issue of issues) {
@@ -1674,7 +1573,8 @@ function groupIssuesByFile(issues: Issue[]): Map<string, Issue[]> {
   return map;
 }
 
-function groupIssuesByEngine(issues: Issue[]): Map<string, Issue[]> {
+// @ts-expect-error - Unused function, kept for potential future use
+function _groupIssuesByEngine(issues: Issue[]): Map<string, Issue[]> {
   const map = new Map<string, Issue[]>();
 
   for (const issue of issues) {

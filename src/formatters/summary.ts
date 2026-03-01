@@ -96,7 +96,28 @@ export function formatSummary(
     }));
     scored.sort((a, b) => b.score - a.score);
 
-    const top5 = scored.slice(0, 5);
+    // Diversify top 5 - show different engine types for better overview
+    const top5: typeof scored = [];
+    const seenEngines = new Set<string>();
+
+    // First pass: one issue per engine type (diverse)
+    for (const item of scored) {
+      if (!seenEngines.has(item.issue.engine)) {
+        top5.push(item);
+        seenEngines.add(item.issue.engine);
+        if (top5.length >= 5) break;
+      }
+    }
+
+    // Second pass: if we don't have 5 yet, fill with highest scored issues
+    if (top5.length < 5) {
+      for (const item of scored) {
+        if (!top5.includes(item)) {
+          top5.push(item);
+          if (top5.length >= 5) break;
+        }
+      }
+    }
 
     top5.forEach(({ issue }, index) => {
       const icon = getSeverityIcon(issue.severity, useEmoji);

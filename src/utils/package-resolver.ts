@@ -163,6 +163,14 @@ export class PackageResolver implements IPackageResolver {
     // CRITICAL FIX: Check if file is IN the package being imported (self-import scenario)
     // This prevents false positives for workspace self-imports (e.g., openclaw importing openclaw)
     const fileWorkspace = this.getWorkspaceName(filePath);
+
+    // Debug logging for workspace resolution
+    if (process.env.CODEDRIFT_DEBUG) {
+      console.log(`[PackageResolver] Checking ${name} for file ${filePath}`);
+      console.log(`[PackageResolver] File workspace: ${fileWorkspace}`);
+      console.log(`[PackageResolver] Self-import match: ${fileWorkspace === name}`);
+    }
+
     if (fileWorkspace && fileWorkspace === name) {
       return true;
     }
