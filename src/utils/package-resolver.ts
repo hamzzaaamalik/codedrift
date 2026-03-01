@@ -172,7 +172,7 @@ export class PackageResolver implements IPackageResolver {
     // Strategy 2: Check nearest package.json to the file (for regular projects)
     // This handles cases where the project imports itself (e.g., openclaw importing openclaw)
     const nearestPkg = this.findNearestPackageJson(filePath);
-    if (nearestPkg && nearestPkg !== this.packageJsonPath) {
+    if (nearestPkg) {
       try {
         let pkgJson: PackageJson;
         if (this.packageJsonCache.has(nearestPkg)) {
@@ -185,7 +185,7 @@ export class PackageResolver implements IPackageResolver {
         // If the nearest package.json has the same name as the import, it's a self-import
         if (pkgJson.name === name) {
           if (process.env.CODEDRIFT_DEBUG) {
-            console.log(`[PackageResolver] ✅ Self-import detected: ${name} matches nearest package.json`);
+            console.log(`[PackageResolver] ✅ Self-import detected: ${name} matches package.json name "${pkgJson.name}"`);
           }
           return true;
         }
