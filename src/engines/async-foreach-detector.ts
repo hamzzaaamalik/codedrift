@@ -54,7 +54,7 @@ export class AsyncForEachDetector extends BaseEngine {
     const methodName = expression.name.text;
 
     // Check if it's an array method that doesn't await
-    const nonAwaitingMethods = ['forEach', 'map', 'filter', 'reduce', 'reduceRight', 'some', 'every'];
+    const nonAwaitingMethods = ['forEach', 'map', 'filter', 'reduce', 'reduceRight', 'some', 'every', 'find', 'findIndex', 'flatMap'];
     if (!nonAwaitingMethods.includes(methodName)) {
       return null;
     }
@@ -75,8 +75,8 @@ export class AsyncForEachDetector extends BaseEngine {
       return null;
     }
 
-    // Special case: If parent is awaited Promise.all(), it's correct usage
-    if (this.isWithinAwaitedPromiseAll(node)) {
+    // Special case: If parent is a safe Promise wrapper, it's correct usage
+    if (this.isWithinSafePromiseWrapper(node)) {
       return null;
     }
 
@@ -115,29 +115,43 @@ export class AsyncForEachDetector extends BaseEngine {
   }
 
   /**
-   * Check if this call is within an awaited Promise.all()
-   * Example: await Promise.all(array.map(async (item) => {...}))
+   * Check if this call is within a safe Promise wrapper
+   * Examples:
+   *   await Promise.all(array.map(async (item) => {...}))
+   *   await Promise.allSettled(array.map(async (item) => {...}))
+   *   await Promise.any(array.map(async (item) => {...}))
+   *   await Promise.race(array.map(async (item) => {...}))
+   *   Promise.all(array.map(...)).then(...)
+   *   Promise.allSettled(array.map(...)).then(...)
    */
-  private isWithinAwaitedPromiseAll(node: ts.Node): boolean {
+  private isWithinSafePromiseWrapper(node: ts.Node): boolean {
     let current = node.parent;
 
     while (current) {
-      // Check if we're inside Promise.all()
       if (ts.isCallExpression(current)) {
         const { expression } = current;
 
-        // Promise.all(...)
+        // Promise.all(...), Promise.allSettled(...), Promise.any(...), Promise.race(...)
         if (ts.isPropertyAccessExpression(expression)) {
           const objectName = ts.isIdentifier(expression.expression)
             ? expression.expression.text
             : null;
           const methodName = expression.name.text;
 
-          if (objectName === 'Promise' && methodName === 'all') {
-            // Check if Promise.all is awaited
-            const promiseAllParent = current.parent;
-            if (promiseAllParent && ts.isAwaitExpression(promiseAllParent)) {
+          const safePromiseMethods = ['all', 'allSettled', 'any', 'race'];
+          if (objectName === 'Promise' && safePromiseMethods.includes(methodName)) {
+            // Direct await: await Promise.all(array.map(...))
+            const promiseCallParent = current.parent;
+            if (promiseCallParent && ts.isAwaitExpression(promiseCallParent)) {
               return true;
+            }
+
+            // Chained: Promise.all(array.map(...)).then(...) / .catch(...)
+            if (promiseCallParent && ts.isPropertyAccessExpression(promiseCallParent)) {
+              const chainMethod = promiseCallParent.name.text;
+              if (['then', 'catch', 'finally'].includes(chainMethod)) {
+                return true;
+              }
             }
           }
         }
@@ -169,6 +183,15 @@ export class AsyncForEachDetector extends BaseEngine {
       case 'some':
       case 'every':
         return 'Use for...of loop with early return: for (const item of array) { if (await check(item)) return true; } return false;';
+
+      case 'find':
+        return 'Use for...of loop: for (const item of array) { if (await predicate(item)) return item; } return undefined;';
+
+      case 'findIndex':
+        return 'Use for...of loop with index: for (let i = 0; i < array.length; i++) { if (await predicate(array[i])) return i; } return -1;';
+
+      case 'flatMap':
+        return 'Use Promise.all + flat: (await Promise.all(array.map(async (item) => fn(item)))).flat()';
 
       default:
         return 'Replace with for...of loop or await Promise.all(array.map(...))';

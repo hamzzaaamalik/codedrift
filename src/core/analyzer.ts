@@ -1,6 +1,7 @@
 import { glob } from 'glob';
 import { AnalysisResult, AnalysisContext, Issue, CodeDriftConfig } from '../types/index.js';
 import { parseFile } from './parser.js';
+import { clearASTCache } from './ast-parser.js';
 import { getAllEngines } from '../engines/index.js';
 import { loadConfig, isRuleEnabled, getRuleSeverity, meetsConfidenceThreshold } from './config.js';
 import { PackageResolver, GitIgnoreParser, isTestFile } from '../utils/index.js';
@@ -8,7 +9,6 @@ import { enrichIssueWithRisk } from './risk-scorer.js';
 import { adjustSeverities } from './severity-adjuster.js';
 import { deduplicateIssues } from './deduplicator.js';
 import { shouldAutoIgnore, shouldBoostConfidence } from './smart-filters.js';
-import * as fs from 'fs';
 
 interface AnalyzeOptions {
   fullScan?: boolean;
@@ -46,6 +46,9 @@ export async function analyzeProject(_options: AnalyzeOptions): Promise<Analysis
     }
   }
 
+  // Reset ESTree AST cache for this run (prevents stale entries across runs)
+  clearASTCache();
+
   // Discover files
   const allDiscoveredFiles = await discoverFiles(cwd, config, gitignoreParser);
 
@@ -67,9 +70,9 @@ export async function analyzeProject(_options: AnalyzeOptions): Promise<Analysis
       // Check if this is a test file (for metadata purposes)
       const isTest = isTestFile(filePath);
 
-      // Parse file
+      // Parse file (sourceFile.text holds the content — no second read needed)
       const sourceFile = parseFile(filePath);
-      const content = fs.readFileSync(filePath, 'utf-8');
+      const content = sourceFile.text;
 
       // Detect workspace name
       const workspaceName = packageResolver?.getWorkspaceName(filePath);

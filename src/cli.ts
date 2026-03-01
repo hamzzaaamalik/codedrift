@@ -8,7 +8,7 @@ import * as readline from 'readline/promises';
 import { analyzeProject } from './core/analyzer.js';
 import { loadConfig } from './core/config.js';
 import { formatJSON } from './core/formatter.js';
-import { formatOutput } from './formatters/index.js';
+import { formatOutput, formatSARIF } from './formatters/index.js';
 import { generateHTMLReport } from './core/html-report.js';
 import { loadBaseline, saveBaseline, filterNewIssues, getDefaultBaselinePath } from './core/baseline.js';
 import type { OutputFormat, AnalysisResult, CodeDriftConfig, Confidence } from './types/index.js';
@@ -32,7 +32,7 @@ program
   .description('Analyze project for AI-induced regressions and drift')
   .option('--full', 'Force full scan (ignore cache)')
   .option('--graph', 'Generate dependency graph visualization')
-  .option('--format <type>', 'Output format: summary (default), detailed, compact, json, html')
+  .option('--format <type>', 'Output format: summary (default), detailed, compact, json, html, sarif')
   .option('--details', 'Show detailed output (alias for --format detailed)')
   .option('--verbose', 'Show verbose output (alias for --format detailed)')
   .option('--quiet', 'Show only critical and high severity issues')
@@ -54,10 +54,10 @@ program
 
     // Validate format option
     if (options.format) {
-      const validFormats = ['summary', 'detailed', 'compact', 'json', 'html'];
+      const validFormats = ['summary', 'detailed', 'compact', 'json', 'html', 'sarif'];
       if (!validFormats.includes(options.format)) {
         console.error(chalk.red(`Invalid format: ${options.format}`));
-        console.error(chalk.gray('Valid values: summary, detailed, compact, json, html'));
+        console.error(chalk.gray('Valid values: summary, detailed, compact, json, html, sarif'));
         process.exit(1);
       }
     }
@@ -207,6 +207,8 @@ program
           finalFormat = 'html' as OutputFormat;
         } else if (outputFile.endsWith('.json')) {
           finalFormat = 'json';
+        } else if (outputFile.endsWith('.sarif')) {
+          finalFormat = 'sarif' as OutputFormat;
         }
       }
 
@@ -214,6 +216,8 @@ program
         outputContent = formatJSON(reportResult, config);
       } else if (finalFormat === 'html') {
         outputContent = generateHTMLReport(reportResult, config, formatterOptions);
+      } else if (finalFormat === 'sarif') {
+        outputContent = formatSARIF(reportResult, config);
       } else {
         // Use the new formatOutput function for terminal/summary/detailed/compact formats
         outputContent = formatOutput(reportResult, config, {
@@ -231,6 +235,9 @@ program
         fs.writeFileSync(outputFile, outputContent, 'utf-8');
         if (finalFormat === 'terminal') {
           console.log(chalk.green(`✓ Report written to ${outputFile}`));
+        } else if (finalFormat === 'sarif') {
+          console.log(chalk.green(`✓ SARIF report written to ${outputFile}`));
+          console.log(chalk.gray('  Upload to GitHub Code Scanning: Settings → Security → Code scanning'));
         } else {
           console.log(chalk.green(`✓ ${finalFormat.toUpperCase()} report written to ${outputFile}`));
         }

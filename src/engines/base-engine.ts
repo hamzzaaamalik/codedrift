@@ -56,6 +56,15 @@ export abstract class BaseEngine implements AnalysisEngine {
       ...(options?.metadata || {}),
     };
 
+    // Extract source context snippet (3 lines before + issue line + 3 lines after)
+    if (!metadata.contextSnippet) {
+      const lines = context.content.split('\n');
+      const issueLine = location.line - 1; // convert 1-indexed to 0-indexed
+      const startLine = Math.max(0, issueLine - 3);
+      const endLine = Math.min(lines.length - 1, issueLine + 3);
+      metadata.contextSnippet = lines.slice(startLine, endLine + 1).join('\n');
+    }
+
     // Determine confidence level with automatic downgrade for test/generated files
     let confidence = options?.confidence ?? 'high';
 

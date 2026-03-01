@@ -81,6 +81,11 @@ export class ConsoleInProductionDetector extends BaseEngine {
       return null;
     }
 
+    // Check if this console call is inside a logger/transport class implementation
+    if (this.isInsideLoggerClass(node)) {
+      return null;
+    }
+
     // Analyze what's being logged - is it sensitive?
     const sensitivity = this.analyzeSensitivity(node);
 
@@ -229,15 +234,78 @@ export class ConsoleInProductionDetector extends BaseEngine {
         /isDevelopment/,
         /isDebug/,
         /__DEV__/,
+        // DEBUG env var is a common pattern alongside NODE_ENV
+        /process\.env\.DEBUG/,
+        /process\.env\.VERBOSE/,
       ];
 
       return devPatterns.some(pattern => pattern.test(text));
     }
 
-    // Check for direct flag: if (isDevelopment) { ... }
+    // Check for direct flag: if (isDevelopment) { ... } or if (DEBUG) { ... }
     if (ts.isIdentifier(node)) {
       const name = node.text.toLowerCase();
-      return ['isdevelopment', 'isdev', 'isdebug', '__dev__'].includes(name);
+      return ['isdevelopment', 'isdev', 'isdebug', '__dev__', 'debug', 'verbose'].includes(name);
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if the console call is inside a logger/transport class implementation.
+   * Logger classes (winston transports, custom loggers, etc.) legitimately wrap console.
+   */
+  private isInsideLoggerClass(node: ts.Node): boolean {
+    let current: ts.Node | undefined = node.parent;
+
+    while (current) {
+      // Check if inside a class declaration or expression
+      if (ts.isClassDeclaration(current) || ts.isClassExpression(current)) {
+        // Check if the class name or containing variable looks like a logger
+        let className: string | null = null;
+
+        if (ts.isClassDeclaration(current) && current.name) {
+          className = current.name.text;
+        } else if (ts.isClassExpression(current) && current.name) {
+          className = current.name.text;
+        } else if (ts.isVariableDeclaration(current.parent as ts.Node)) {
+          const decl = current.parent as ts.VariableDeclaration;
+          if (ts.isIdentifier(decl.name)) {
+            className = decl.name.text;
+          }
+        }
+
+        if (className) {
+          const loggerClassPatterns = /logger|logging|transport|winston|pino|bunyan|log4/i;
+          if (loggerClassPatterns.test(className)) {
+            return true;
+          }
+        }
+      }
+
+      // Check if inside a method whose name is a standard log level
+      if (ts.isMethodDeclaration(current) && ts.isIdentifier(current.name)) {
+        const methodName = current.name.text.toLowerCase();
+        const logLevelMethods = ['log', 'warn', 'error', 'info', 'debug', 'trace', 'fatal', 'verbose'];
+
+        if (logLevelMethods.includes(methodName)) {
+          // Only skip if it's inside a class that has multiple log methods (logger pattern)
+          const parentClass = current.parent;
+          if (ts.isClassDeclaration(parentClass) || ts.isClassExpression(parentClass)) {
+            const logMethods = parentClass.members.filter((m: ts.ClassElement) =>
+              ts.isMethodDeclaration(m) &&
+              ts.isIdentifier(m.name) &&
+              logLevelMethods.includes(m.name.text.toLowerCase())
+            );
+            // If the class has 2+ log-level methods, it's a logger implementation
+            if (logMethods.length >= 2) {
+              return true;
+            }
+          }
+        }
+      }
+
+      current = current.parent;
     }
 
     return false;

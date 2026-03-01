@@ -132,7 +132,7 @@ export class SecretDetector extends BaseEngine {
     // { name: 'LinkedIn Client Secret', pattern: /[a-zA-Z0-9]{16}/, severity: 'warning' },
     // { name: 'LinkedIn Access Token', pattern: /[a-zA-Z0-9\-_]{76}/, severity: 'error' },
     // { name: 'Auth0 Client Secret', pattern: /[A-Za-z0-9_\-]{64}/, severity: 'error' },
-    { name: 'Okta API Token', pattern: /00[A-Za-z0-9\-_]{38}/, severity: 'error' },
+    { name: 'Okta API Token', pattern: /00[A-Za-z0-9\-_]{38}/, severity: 'error', minimumEntropy: 3.5 },
     // { name: 'Firebase Auth Token', pattern: /[A-Za-z0-9\-_]{21,}/, severity: 'warning' },
 
     // === Databases (8 patterns) ===
@@ -211,6 +211,16 @@ export class SecretDetector extends BaseEngine {
       return null;
     }
 
+    // Skip file paths (e.g. migration filenames passed to runMigration())
+    if (this.isFilePath(value)) {
+      return null;
+    }
+
+    // Skip strings that are arguments to known file/path functions
+    if (this.isInSafeCallContext(node)) {
+      return null;
+    }
+
     // Skip placeholder values
     if (this.isPlaceholder(value)) {
       return null;
@@ -239,9 +249,10 @@ export class SecretDetector extends BaseEngine {
           confidence = entropy > minimumEntropy + 0.5 ? 'high' : 'medium';
         }
 
+        const envVarName = this.toEnvVarName(name);
         const issue = this.createIssue(context, node, `Hardcoded secret detected: ${name}`, {
           severity,
-          suggestion: 'Use environment variables or secret management service',
+          suggestion: `Use process.env.${envVarName} instead of hardcoding this ${name}`,
           confidence,
         });
 
@@ -315,6 +326,76 @@ export class SecretDetector extends BaseEngine {
     }
 
     return entropy;
+  }
+
+  /**
+   * Convert a human-readable secret pattern name to an environment variable name
+   * e.g. "Okta API Token" → "OKTA_API_TOKEN"
+   */
+  private toEnvVarName(patternName: string): string {
+    return patternName.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+  }
+
+  /**
+   * Check if value looks like a file path (not a secret)
+   * File paths end in known extensions or contain path separators
+   */
+  private isFilePath(value: string): boolean {
+    // Contains path separators — clearly a path
+    if (value.includes('/') || value.includes('\\')) {
+      return true;
+    }
+
+    // Ends with a known file extension
+    const fileExtensions = /\.(sql|json|ts|tsx|js|jsx|py|rb|go|java|cs|php|html|css|md|yml|yaml|xml|csv|txt|sh|bash|env|lock|toml|ini|cfg|conf|log)$/i;
+    if (fileExtensions.test(value)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if string literal is an argument to a known safe file/path function
+   * e.g. runMigration('001_create_table.sql'), readFileSync('config.json')
+   */
+  private isInSafeCallContext(node: ts.StringLiteral): boolean {
+    const parent = node.parent;
+
+    // Must be a call expression
+    if (!parent || !ts.isCallExpression(parent)) {
+      return false;
+    }
+
+    // The string must be one of the arguments (not the callee)
+    if (!parent.arguments.includes(node as ts.Expression)) {
+      return false;
+    }
+
+    // Get the function name being called
+    const expr = parent.expression;
+    let funcName: string | null = null;
+
+    if (ts.isIdentifier(expr)) {
+      funcName = expr.text;
+    } else if (ts.isPropertyAccessExpression(expr)) {
+      funcName = expr.name.text;
+    }
+
+    if (!funcName) {
+      return false;
+    }
+
+    const safeFileFunctions = new Set([
+      'join', 'resolve', 'dirname', 'basename', 'extname',
+      'readFile', 'readFileSync', 'writeFile', 'writeFileSync',
+      'appendFile', 'appendFileSync', 'existsSync', 'statSync',
+      'mkdirSync', 'copyFile', 'rename', 'unlink',
+      'require', 'runMigration', 'execFile', 'spawn',
+      'createReadStream', 'createWriteStream', 'glob',
+    ]);
+
+    return safeFileFunctions.has(funcName);
   }
 
   /**

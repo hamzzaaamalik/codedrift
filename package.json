@@ -1,6 +1,6 @@
 {
   "name": "codedrift",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Guardrails for AI-assisted development - Detects IDOR, missing input validation, hardcoded secrets, and other critical bugs in AI-generated code",
   "type": "module",
   "main": "dist/cli.js",
@@ -65,6 +65,8 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@typescript-eslint/parser": "^8.56.1",
+    "@typescript-eslint/typescript-estree": "^8.56.1",
     "chalk": "^5.6.2",
     "commander": "^14.0.3",
     "glob": "^13.0.6",

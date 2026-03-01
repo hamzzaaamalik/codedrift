@@ -5,7 +5,7 @@
 import type { Issue } from '../types/index.js';
 
 export type GroupByType = 'severity' | 'file' | 'engine';
-export type FormatType = 'summary' | 'detailed' | 'compact' | 'json';
+export type FormatType = 'summary' | 'detailed' | 'compact' | 'json' | 'sarif';
 
 export interface FormatterOptions {
   /** Format type for output */

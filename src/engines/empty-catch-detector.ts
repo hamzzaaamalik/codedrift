@@ -53,6 +53,14 @@ export class EmptyCatchDetector extends BaseEngine {
 
     // Completely empty block
     if (block.statements.length === 0) {
+      // catch { } without an error binding is intentional optional-catch-binding (ES2019).
+      // The developer explicitly chose not to bind the error variable, which signals
+      // deliberate suppression. Only flag when a named variable was bound but ignored.
+      const hasErrorBinding = catchClause.variableDeclaration !== undefined;
+      if (!hasErrorBinding) {
+        return null;
+      }
+
       return this.createIssue(context, catchClause, 'Empty catch block silently swallows errors', {
         severity: inMigration ? 'info' : 'error', // Downgrade for migrations
         suggestion: inMigration

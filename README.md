@@ -1,11 +1,21 @@
 # CodeDrift
 
-Guardrails for AI-assisted development. Catches security vulnerabilities and runtime bugs that AI coding assistants introduce into JavaScript and TypeScript codebases.
+The integrity layer for AI-generated code. Catches the bugs that Copilot, Cursor, and ChatGPT silently ship to production.
 
 [![npm version](https://badge.fury.io/js/codedrift.svg)](https://www.npmjs.com/package/codedrift)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Whether you're using GitHub Copilot for autocomplete, generating entire functions with ChatGPT, or writing code manually, CodeDrift detects dangerous patterns before they ship. Think of it as a safety net for the new era of AI-accelerated development.
+AI coding assistants are writing more production code every month. They're fast, fluent, and confidently wrong. They generate async functions that never complete, import packages that don't exist, leak secrets in error responses, and pass code review because it looks correct.
+
+CodeDrift is the safety layer between AI-generated code and production. It detects the class of bugs that are syntactically valid but semantically dangerous — the ones that ESLint, TypeScript, and human reviewers miss because the code reads fine.
+
+## What's Actually Happening
+
+### The Problem Getting Worse
+
+Every team using AI coding tools is accumulating structural debt they can't see. Missing awaits silently corrupt data. Hallucinated dependencies pass CI and crash in production. Stack traces with API keys leak through error handlers that look perfectly reasonable.
+
+This isn't a tooling gap. It's a trust gap. Teams are shipping AI-written code faster than they can verify it. CodeDrift closes that gap — not by slowing down AI adoption, but by making it safe.
 
 ## Quick Start
 
@@ -69,7 +79,7 @@ CRITICAL Issues (1)
 | Hardcoded Secrets | API keys and tokens in source code | Critical |
 | Stack Trace Exposure | Error stacks leaked in API responses | Critical |
 | Missing Await | Async functions called without await | Critical |
-| Async forEach | forEach with async callbacks that silently fail | Critical |
+| Async forEach | forEach/map/filter with async callbacks — skips `Promise.all/allSettled/any/race` wrapping | Critical |
 | Hallucinated Dependencies | Imports of packages that do not exist | Critical |
 | Unsafe Regex | Regular expressions vulnerable to ReDoS | Error |
 | Console in Production | console.log in production code | Warning |
@@ -467,15 +477,21 @@ Examples:
 
 ## How It Works
 
-CodeDrift uses the TypeScript Compiler API to parse source code into an Abstract Syntax Tree. Ten detection engines traverse the AST looking for dangerous patterns.
+CodeDrift uses the TypeScript Compiler API to parse source code into an AST with full JSX/TSX support. Ten detection engines traverse the AST looking for semantically dangerous patterns — not just style issues.
 
 Architecture:
-- Parser: Converts code to AST using typescript compiler
-- Engines: Pattern detectors for IDOR, secrets, missing await, etc
-- Formatter: Outputs results as terminal, JSON, or HTML
-- CLI: Orchestrates analysis and handles exit codes
+- **Parser**: Converts code to AST; files are parsed once and cached — never read twice per run
+- **Engines**: Pattern detectors with multi-level confidence scoring. Each engine walks the AST and classifies findings by severity and confidence before they surface
+- **Formatter**: Outputs results as terminal, JSON, or HTML
+- **CLI**: Orchestrates analysis, handles exit codes, and integrates with CI/CD pipelines
 
-Performance: 50 files per second on typical projects
+Engine highlights:
+- **Stack trace**: Distinguishes `res.json({ error: err.stack })` (report) from `logger.error({ stack: err.stack })` (skip) — works with any Express response parameter name, not just `res`
+- **async-forEach**: Recognises `await Promise.allSettled/any/race(array.map(...))` and chained `.then()` as safe patterns
+- **missing-await**: Scope-aware — only flags calls inside async functions where `await` is actually valid
+- **Secrets**: Entropy-filtered, path-aware — ignores migration filenames, file path arguments, and test fixtures
+
+Performance: 100+ files per second on typical projects
 Privacy: 100% local analysis, no telemetry, code never leaves your machine
 
 ## Contributing

@@ -8,6 +8,7 @@ import { formatSummary } from './summary.js';
 import { formatDetailed } from './detailed.js';
 import { formatCompact } from './compact.js';
 import { formatGrouped } from './grouped.js';
+import { formatSARIF } from './sarif.js';
 import type { FormatType, GroupByType } from './types.js';
 
 export interface FormatterOptions {
@@ -83,6 +84,9 @@ export function formatOutput(
     case 'json':
       return formatJSON(filteredResult, config);
 
+    case 'sarif':
+      return formatSARIF(filteredResult, config);
+
     default:
       return formatSummary(filteredResult, config, formatterOpts);
   }
@@ -94,3 +98,4 @@ export { formatSummary } from './summary.js';
 export { formatDetailed } from './detailed.js';
 export { formatCompact } from './compact.js';
 export { formatGrouped } from './grouped.js';
+export { formatSARIF } from './sarif.js';

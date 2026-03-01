@@ -327,6 +327,30 @@ export class IDORDetector extends BaseEngine {
         if (text.match(/where.*user_id|user_id.*=|userId.*=/i)) {
           hasCheck = true;
         }
+
+        // Check for authorization function calls: canAccess(user, doc), authorize(req, resource), etc.
+        const callExpr = node.expression;
+        let callName: string | null = null;
+
+        if (ts.isIdentifier(callExpr)) {
+          callName = callExpr.text;
+        } else if (ts.isPropertyAccessExpression(callExpr)) {
+          callName = callExpr.name.text;
+        }
+
+        if (callName) {
+          const authFunctionPatterns = [
+            /^(can|check|verify|validate|assert|require)(Access|Permission|Auth|Owner|Ownership|Role|Roles)$/i,
+            /^(authorize|authorise|isAuthorized|isOwner|isAllowed|isPermitted)$/i,
+            /^(hasPermission|hasAccess|hasRole|hasOwnership|belongsToUser)$/i,
+            /^(enforceAccess|enforceOwnership|enforcePermission|enforceAuth)$/i,
+            /^guard$/i,
+          ];
+
+          if (authFunctionPatterns.some(pattern => pattern.test(callName!))) {
+            hasCheck = true;
+          }
+        }
       }
 
       // Check for middleware/guard decorators (NestJS)

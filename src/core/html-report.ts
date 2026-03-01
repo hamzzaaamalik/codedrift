@@ -1574,12 +1574,10 @@ function renderIssuesWithGrouping(issues: Issue[]): string {
   };
 
   let html = '';
-  const renderedEngines = new Set<string>();
 
-  // Separate critical issues from remaining issues
-  const remainingIssues = issues.filter(i => !renderedEngines.has(i.engine));
-  const criticalIssues = remainingIssues.filter(i => i.severity === 'error');
-  const nonCriticalIssues = remainingIssues.filter(i => i.severity !== 'error');
+  // Non-high-volume issues only (high-volume engines get their own collapsed groups below)
+  const criticalIssues = issues.filter(i => i.severity === 'error' && !highVolumeEngines.has(i.engine));
+  const nonCriticalIssues = issues.filter(i => i.severity !== 'error' && !highVolumeEngines.has(i.engine));
 
   // Render critical issues FIRST (highest priority, always visible)
   if (criticalIssues.length > 0) {
@@ -1606,10 +1604,9 @@ function renderIssuesWithGrouping(issues: Issue[]): string {
       </div>
     </div>
     `;
-    renderedEngines.add(engine);
   }
 
-  // Finally render remaining non-critical issues
+  // Finally render remaining non-critical issues (from non-high-volume engines)
   if (nonCriticalIssues.length > 0) {
     html += renderIssues(nonCriticalIssues);
   }

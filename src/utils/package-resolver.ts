@@ -38,6 +38,7 @@ export class PackageResolver implements IPackageResolver {
   private packageJsonCache: Map<string, PackageJson> = new Map();
   private workspaces: WorkspaceInfo[] = [];
   private workspacesLoaded = false;
+  private workspaceNameCache: Map<string, string | undefined> = new Map();
 
   /**
    * Create a new PackageResolver
@@ -169,13 +170,12 @@ export class PackageResolver implements IPackageResolver {
       return true;
     }
 
-    // Strategy 2: Walk UP the directory tree checking ALL package.json files
+    // Strategy 2: Single walk UP the directory tree — check for self-imports AND dependencies
     // This handles monorepos where extensions/*/package.json import root package
-    // Example: extensions/tlon/src/file.ts imports "openclaw" (root package name)
+    const rootDir = path.dirname(this.packageJsonPath);
     let searchDir = path.dirname(filePath);
-    const projectRoot = path.dirname(this.packageJsonPath);
 
-    while (searchDir.startsWith(projectRoot) || searchDir === projectRoot) {
+    while (searchDir.startsWith(rootDir) || searchDir === rootDir) {
       const pkgPath = path.join(searchDir, 'package.json');
 
       if (fs.existsSync(pkgPath)) {
@@ -188,7 +188,7 @@ export class PackageResolver implements IPackageResolver {
             this.packageJsonCache.set(pkgPath, pkgJson);
           }
 
-          // If ANY package.json in the tree has the same name as the import, it's a self-import
+          // Self-import check: any package.json in the tree with same name
           if (pkgJson.name === name) {
             if (process.env.CODEDRIFT_DEBUG) {
               console.log(`\n[PackageResolver] ✅ SELF-IMPORT DETECTED!`);
@@ -197,12 +197,16 @@ export class PackageResolver implements IPackageResolver {
             }
             return true;
           }
+
+          // Dependency check (skip root — checked at the end via hasAnyDependency)
+          if (pkgPath !== this.packageJsonPath && this.isInDependencies(name, pkgJson)) {
+            return true;
+          }
         } catch (error) {
           // Ignore errors loading package.json
         }
       }
 
-      // Move up one directory
       const parentDir = path.dirname(searchDir);
       if (parentDir === searchDir) {
         break; // Reached filesystem root
@@ -215,40 +219,6 @@ export class PackageResolver implements IPackageResolver {
       if (workspace.name === name) {
         return true;
       }
-    }
-
-    // Walk up directory tree checking ALL package.json dependencies
-    // This handles cases where dependencies are defined in parent workspace packages
-    let currentDir = path.dirname(filePath);
-    const rootDir = path.dirname(this.packageJsonPath);
-
-    while (currentDir.startsWith(rootDir) && currentDir !== rootDir) {
-      const pkgPath = path.join(currentDir, 'package.json');
-      if (fs.existsSync(pkgPath)) {
-        let packageJson: PackageJson;
-        if (this.packageJsonCache.has(pkgPath)) {
-          packageJson = this.packageJsonCache.get(pkgPath)!;
-        } else {
-          try {
-            packageJson = this.loadPackageJson(pkgPath);
-            this.packageJsonCache.set(pkgPath, packageJson);
-          } catch (error) {
-            // Skip invalid package.json files
-            break;
-          }
-        }
-
-        // Check all dependency types in this package.json
-        if (packageJson && this.isInDependencies(name, packageJson)) {
-          return true;
-        }
-      }
-
-      const parentDir = path.dirname(currentDir);
-      if (parentDir === currentDir) {
-        break; // Reached filesystem root
-      }
-      currentDir = parentDir;
     }
 
     // Finally, check root package.json
@@ -281,18 +251,26 @@ export class PackageResolver implements IPackageResolver {
       this.loadWorkspaces();
     }
 
+    const cached = this.workspaceNameCache.get(filePath);
+    if (cached !== undefined || this.workspaceNameCache.has(filePath)) {
+      return cached;
+    }
+
     // Normalize the file path
     const normalizedPath = path.resolve(filePath);
 
     // Find the workspace that contains this file
+    let result: string | undefined;
     for (const workspace of this.workspaces) {
       const workspacePath = path.resolve(workspace.path);
       if (normalizedPath.startsWith(workspacePath)) {
-        return workspace.name;
+        result = workspace.name;
+        break;
       }
     }
 
-    return undefined;
+    this.workspaceNameCache.set(filePath, result);
+    return result;
   }
 
   /**

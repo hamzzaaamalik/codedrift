@@ -60,6 +60,11 @@ export class MissingAwaitDetector extends BaseEngine {
       }
     }
 
+    // Skip if not inside an async function (await is invalid here — not a real issue)
+    if (!this.isInsideAsyncFunction(node)) {
+      return null;
+    }
+
     // Get function name for better detection
     const { expression } = node;
     let functionName: string | null = null;
@@ -95,17 +100,17 @@ export class MissingAwaitDetector extends BaseEngine {
       // HIGH confidence: Declared as async and return value is used
       confidence = 'high';
       message = `Async function '${functionName}' called without await`;
-      suggestion = 'Add await to ensure operation completes before continuing';
+      suggestion = `Add 'await' before the call: \`await ${functionName}(...)\``;
     } else if (isDeclaredAsync) {
       // MEDIUM confidence: Declared as async but return value not used (might be fire-and-forget)
       confidence = 'medium';
       message = `Async function '${functionName}' called without await (fire-and-forget?)`;
-      suggestion = 'Add await if operation must complete, or use void operator to make intent clear';
+      suggestion = `If this must complete before continuing, use: \`await ${functionName}(...)\`. Otherwise add \`void ${functionName}(...)\` to make fire-and-forget intent explicit.`;
     } else if (matchesAsyncPattern && returnValueUsed) {
       // MEDIUM confidence: Matches pattern and return value used
       confidence = 'medium';
       message = `Function '${functionName}' appears async but not awaited`;
-      suggestion = 'Add await if this function is actually async';
+      suggestion = `If '${functionName}' is async, prefix with \`await ${functionName}(...)\`. Otherwise no change needed.`;
     } else if (matchesAsyncPattern) {
       // LOW confidence: Matches pattern but return value not used
       confidence = 'low';
@@ -176,6 +181,26 @@ export class MissingAwaitDetector extends BaseEngine {
     }
 
     return false;
+  }
+
+  /**
+   * Check if node is inside an async function context
+   * (await is only valid inside async functions)
+   */
+  private isInsideAsyncFunction(node: ts.Node): boolean {
+    let current = node.parent;
+    while (current) {
+      if (
+        ts.isFunctionDeclaration(current) ||
+        ts.isFunctionExpression(current) ||
+        ts.isArrowFunction(current) ||
+        ts.isMethodDeclaration(current)
+      ) {
+        return !!(current.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword));
+      }
+      current = current.parent;
+    }
+    return false; // top-level module scope — no async context
   }
 
   /**

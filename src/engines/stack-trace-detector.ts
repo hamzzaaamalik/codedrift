@@ -14,6 +14,8 @@ export class StackTraceDetector extends BaseEngine {
 
   async analyze(context: AnalysisContext): Promise<Issue[]> {
     const issues: Issue[] = [];
+    // Track nodes already reported to avoid duplicates
+    const reportedNodes = new Set<ts.Node>();
 
     traverse(context.sourceFile, (node) => {
       if (ts.isCallExpression(node)) {
@@ -21,17 +23,123 @@ export class StackTraceDetector extends BaseEngine {
         const responseIssue = this.checkResponseCall(node, context);
         if (responseIssue) {
           issues.push(responseIssue);
+          reportedNodes.add(node);
         }
 
         // Check for logger calls with stack traces and sensitive data
         const loggerIssue = this.checkLoggerCall(node, context);
         if (loggerIssue) {
           issues.push(loggerIssue);
+          reportedNodes.add(node);
+        }
+      }
+
+      // Bottom-up traversal: find err.stack property accesses and classify by context
+      if (ts.isPropertyAccessExpression(node) &&
+          ts.isIdentifier(node.name) && node.name.text === 'stack' &&
+          ts.isIdentifier(node.expression) &&
+          this.isErrorVariableName(node.expression.text)) {
+        // Skip if already reported via the call-expression path above
+        if (this.isNodeInsideReportedNode(node, reportedNodes)) {
+          return;
+        }
+
+        // Stack trace going to a logger — safe, server-side only
+        if (this.isInLoggerContext(node)) {
+          return;
+        }
+
+        // Stack trace going to an HTTP response — severity error
+        if (this.isInResponseContext(node)) {
+          const issue = this.createIssue(
+            context,
+            node,
+            'Stack trace exposed in API response',
+            {
+              severity: 'error',
+              suggestion: 'Use generic error message. Log stack traces server-side only.',
+              confidence: 'high',
+            }
+          );
+          if (issue) {
+            issues.push(issue);
+          }
         }
       }
     });
 
     return issues;
+  }
+
+  /**
+   * Check if a node is nested inside any of the already-reported nodes
+   */
+  private isNodeInsideReportedNode(node: ts.Node, reportedNodes: Set<ts.Node>): boolean {
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (reportedNodes.has(current)) {
+        return true;
+      }
+      current = current.parent;
+    }
+    return false;
+  }
+
+  /**
+   * Walk up the AST to determine if a node is passed to an HTTP response method.
+   * Detects: res.json({...}), res.send({...}), reply.send({...}), ctx.body = ..., res.body = ...
+   */
+  private isInResponseContext(node: ts.Node): boolean {
+    const expressResParam = this.getExpressResponseParamName(node);
+    let current = node.parent;
+    let depth = 0;
+    while (current && depth < 8) {
+      // res.json({...}), res.send({...}), reply.send({...})
+      if (ts.isCallExpression(current) && ts.isPropertyAccessExpression(current.expression)) {
+        const obj = current.expression.expression;
+        const method = current.expression.name.text;
+        const responseObjects = ['res', 'response', 'reply', 'ctx'];
+        const responseMethods = ['json', 'send', 'end', 'write'];
+        // Match hardcoded names OR the Express-detected param name
+        if (ts.isIdentifier(obj) &&
+            (responseObjects.includes(obj.text) || (expressResParam && obj.text === expressResParam)) &&
+            responseMethods.includes(method)) {
+          return true;
+        }
+      }
+      // Assignment to ctx.body, res.body, response.data, etc.
+      if (ts.isBinaryExpression(current) && ts.isPropertyAccessExpression(current.left)) {
+        if (ts.isIdentifier(current.left.expression) &&
+            ['ctx', 'res', 'response'].includes(current.left.expression.text) &&
+            ['body', 'data'].includes(current.left.name.text)) {
+          return true;
+        }
+      }
+      current = current.parent;
+      depth++;
+    }
+    return false;
+  }
+
+  /**
+   * Walk up the AST to determine if a node is passed to a logger/console call.
+   * Detects: logger.error({...}), console.log({...}), pino.info({...}), etc.
+   */
+  private isInLoggerContext(node: ts.Node): boolean {
+    let current = node.parent;
+    let depth = 0;
+    while (current && depth < 6) {
+      if (ts.isCallExpression(current) && ts.isPropertyAccessExpression(current.expression)) {
+        const obj = current.expression.expression;
+        const loggerObjects = ['console', 'logger', 'log', 'winston', 'pino', 'bunyan', 'debug'];
+        if (ts.isIdentifier(obj) && loggerObjects.includes(obj.text)) {
+          return true;
+        }
+      }
+      current = current.parent;
+      depth++;
+    }
+    return false;
   }
 
   /**
@@ -55,8 +163,12 @@ export class StackTraceDetector extends BaseEngine {
     // Get the base object name (handles res.status().json() chains)
     const baseObjectName = this.getBaseObjectName(expression.expression);
 
+    // Also accept the Express handler's response parameter (any naming convention)
+    const expressResParam = this.getExpressResponseParamName(node);
+
     // Only check response methods
-    if (!this.isResponseMethod(methodName, baseObjectName)) {
+    if (!this.isResponseMethod(methodName, baseObjectName) &&
+        !(expressResParam && baseObjectName === expressResParam)) {
       return null;
     }
 
@@ -205,6 +317,42 @@ export class StackTraceDetector extends BaseEngine {
         isSimpleErrorVar = true;
       }
 
+      // Check for String(err) — converts error to string including stack
+      if (ts.isCallExpression(node)) {
+        const callExpr = node.expression;
+
+        // String(err)
+        if (ts.isIdentifier(callExpr) && callExpr.text === 'String' && node.arguments.length > 0) {
+          const arg0 = node.arguments[0];
+          if (ts.isIdentifier(arg0) && this.isErrorVariableName(arg0.text)) {
+            hasStack = true;
+            hasExplicitStack = true;
+          }
+        }
+
+        // JSON.stringify(err)
+        if (ts.isPropertyAccessExpression(callExpr) &&
+            ts.isIdentifier(callExpr.expression) && callExpr.expression.text === 'JSON' &&
+            callExpr.name.text === 'stringify' && node.arguments.length > 0) {
+          const arg0 = node.arguments[0];
+          if (ts.isIdentifier(arg0) && this.isErrorVariableName(arg0.text)) {
+            hasStack = true;
+            hasExplicitStack = true;
+          }
+        }
+      }
+
+      // Check for err.toString() — includes error message but not stack; medium confidence
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+        const propAccess = node.expression;
+        if (propAccess.name.text === 'toString' &&
+            ts.isIdentifier(propAccess.expression) &&
+            this.isErrorVariableName(propAccess.expression.text)) {
+          hasStack = true;
+          // toString() is lower risk than explicit stack but still leaks internals
+        }
+      }
+
       ts.forEachChild(node, checkNode);
     };
 
@@ -294,8 +442,57 @@ export class StackTraceDetector extends BaseEngine {
       return false;
     }
 
-    const logObjects = ['logger', 'log', 'console'];
+    const logObjects = ['logger', 'log', 'console', 'winston', 'pino', 'bunyan', 'debug'];
     return objectName ? logObjects.includes(objectName) : false;
+  }
+
+  /**
+   * Detect the response parameter name for the enclosing Express-style route handler.
+   * Express: app.get('/path', (req, res) => { ... }) — res is params[1]
+   * Error handler: app.use((err, req, res, next) => { ... }) — res is params[2]
+   *
+   * @param node - Any node inside the handler function
+   * @returns The variable name used as the response object, or null if not in an Express handler
+   */
+  private getExpressResponseParamName(node: ts.Node): string | null {
+    let current = node.parent;
+    while (current) {
+      const isFunctionLike = (
+        ts.isFunctionDeclaration(current) ||
+        ts.isFunctionExpression(current) ||
+        ts.isArrowFunction(current) ||
+        ts.isMethodDeclaration(current)
+      );
+      if (isFunctionLike) {
+        const fn = current as ts.FunctionLikeDeclaration;
+        const fnParent = fn.parent;
+        // Is this function directly passed as an argument to an Express-style route call?
+        if (fnParent && ts.isCallExpression(fnParent) && this.isExpressRouteCall(fnParent)) {
+          const params = fn.parameters;
+          // Error handler: (err, req, res, next) — 4 params, res at index 2
+          if (params.length === 4 && ts.isIdentifier(params[2].name)) {
+            return params[2].name.text;
+          }
+          // Regular handler: (req, res[, next]) — 2-3 params, res at index 1
+          if (params.length >= 2 && params.length < 4 && ts.isIdentifier(params[1].name)) {
+            return params[1].name.text;
+          }
+        }
+      }
+      current = current.parent;
+    }
+    return null;
+  }
+
+  /**
+   * Check if a call expression is an Express-style route registration call.
+   * Matches: app.get(), app.post(), router.use(), app.all(), etc.
+   */
+  private isExpressRouteCall(call: ts.CallExpression): boolean {
+    if (!ts.isPropertyAccessExpression(call.expression)) return false;
+    const method = call.expression.name.text;
+    const httpMethods = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'use', 'all', 'route', 'param'];
+    return httpMethods.includes(method);
   }
 
   /**

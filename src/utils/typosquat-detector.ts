@@ -34,7 +34,95 @@ export const POPULAR_PACKAGES = [
 
   // Database clients
   'mongodb', 'mysql', 'pg', 'sqlite3', 'knex', 'typeorm',
+
+  // React ecosystem
+  'react-router', 'react-router-dom', 'react-query', 'react-redux',
+  'react-hook-form', 'react-icons', 'react-select', 'react-table',
+  'react-dnd', 'react-spring', 'framer-motion', 'styled-components',
+  'zustand', 'recoil', 'jotai', 'redux', 'redux-toolkit', 'mobx', 'immer',
+
+  // Node.js HTTP clients
+  'node-fetch', 'got', 'cross-fetch', 'ky', 'superagent', 'needle',
+  'undici', 'node-axios',
+
+  // Auth and security
+  'bcryptjs', 'argon2', 'jose', 'jwks-rsa', 'node-rsa', 'crypto-js',
+  'speakeasy', 'node-otp', 'otplib',
+
+  // Cloud SDKs and services
+  'aws-sdk', 'firebase', 'firebase-admin', 'stripe', 'twilio', 'sendgrid',
+  'nodemailer', 'mailchimp', 'sendbird', 'pusher',
+
+  // Validation and schema
+  'zod', 'yup', 'joi', 'class-validator', 'ajv', 'superstruct', 'io-ts',
+
+  // Database ORMs and query builders
+  'drizzle-orm', 'kysely', 'mikro-orm', 'objection',
+
+  // Build and monorepo tools
+  'turbo', 'nx', 'lerna', 'changesets', 'wireit', 'rush',
+
+  // Utilities
+  'lodash-es', 'nanoid', 'clsx', 'classnames', 'ms', 'p-limit',
+  'execa', 'cross-env', 'dotenv-expand', 'env-cmd',
+  'glob', 'fast-glob', 'micromatch', 'minimatch',
+  'semver', 'node-semver', 'compare-versions',
+  'csv-parse', 'papaparse', 'xlsx', 'exceljs',
+  'sharp', 'jimp', 'canvas',
+  'multer', 'formidable', 'busboy',
+  'winston', 'pino', 'bunyan', 'log4js', 'morgan',
+  'pm2', 'nodemon', 'concurrently',
+  'js-yaml', 'yaml', 'toml', 'ini',
 ];
+
+/**
+ * Known supply chain attack package names mapped to the legitimate package they impersonate.
+ * These are hardcoded real-world typosquats — always flagged with high confidence.
+ */
+export const KNOWN_ATTACK_PACKAGES: Map<string, string> = new Map([
+  ['crossenv', 'cross-env'],
+  ['cross_env', 'cross-env'],
+  ['nodemailer-js', 'nodemailer'],
+  ['loadyaml', 'js-yaml'],
+  ['babbel', 'babel'],
+  ['mongose', 'mongoose'],
+  ['expres', 'express'],
+  ['expresss', 'express'],
+  ['lodas', 'lodash'],
+  ['lodash-js', 'lodash'],
+  ['recat', 'react'],
+  ['reeact', 'react'],
+  ['reactt', 'react'],
+  ['axois', 'axios'],
+  ['axio', 'axios'],
+  ['axxios', 'axios'],
+  ['webapck', 'webpack'],
+  ['webpackk', 'webpack'],
+  ['eslint-js', 'eslint'],
+  ['typscript', 'typescript'],
+  ['typescipt', 'typescript'],
+  ['mogoose', 'mongoose'],
+  ['chak', 'chalk'],
+  ['chalkjs', 'chalk'],
+  ['momment', 'moment'],
+  ['momnet', 'moment'],
+  ['uuidjs', 'uuid'],
+  ['socket-io', 'socket.io'],
+  ['socketio', 'socket.io'],
+  ['nextjs', 'next'],
+  ['vuejs', 'vue'],
+  ['angularjs', 'angular'],
+  ['pasport', 'passport'],
+  ['passportjs', 'passport'],
+  ['bcrypt-js', 'bcryptjs'],
+  ['prismajs', 'prisma'],
+  ['graphqll', 'graphql'],
+  ['fastifyjs', 'fastify'],
+  ['koajs', 'koa'],
+  ['nuxtjs', 'nuxt'],
+  ['gatbsy', 'gatsby'],
+  ['remmix', 'remix'],
+]);
 
 /**
  * Calculate Levenshtein distance between two strings
@@ -87,6 +175,12 @@ export function checkTyposquat(packageName: string): {
     return { isTyposquat: false, targetPackage: null, distance: 0, confidence: 'low' };
   }
 
+  // Check known attack packages first — guaranteed high confidence
+  const knownTarget = KNOWN_ATTACK_PACKAGES.get(packageName.toLowerCase());
+  if (knownTarget) {
+    return { isTyposquat: true, targetPackage: knownTarget, distance: 1, confidence: 'high' };
+  }
+
   let closestPackage: string | null = null;
   let minDistance = Infinity;
 
@@ -132,6 +226,9 @@ export function hasTyposquatPattern(packageName: string, targetPackage: string):
 
   // Common typosquat patterns
   const patterns = [
+    // Hyphen/underscore confusion: cross_env vs cross-env
+    () => name.replace(/_/g, '-') === target || name.replace(/-/g, '_') === target,
+
     // Missing character: expres vs express
     () => name.length === target.length - 1 && target.includes(name),
 

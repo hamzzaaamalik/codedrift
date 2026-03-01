@@ -132,7 +132,7 @@ export interface CacheEntry {
 
 export type RuleLevel = 'error' | 'warn' | 'off';
 
-export type OutputFormat = 'terminal' | 'summary' | 'detailed' | 'compact' | 'json' | 'html';
+export type OutputFormat = 'terminal' | 'summary' | 'detailed' | 'compact' | 'json' | 'html' | 'sarif';
 
 export interface CodeDriftConfig {
   // File patterns to exclude from analysis
