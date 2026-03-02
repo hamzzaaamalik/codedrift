@@ -13,7 +13,7 @@
 
 import { BaseEngine } from './base-engine.js';
 import { AnalysisContext, Issue } from '../types/index.js';
-import { traverse } from '../core/parser.js';
+import { traverse, getImports } from '../core/parser.js';
 import { isCLIFile, isMigrationFile } from '../utils/file-utils.js';
 import * as ts from 'typescript';
 
@@ -33,10 +33,18 @@ export class ConsoleInProductionDetector extends BaseEngine {
       return issues;
     }
 
+    // Check if this file imports an established logging library
+    const hasLoggerImport = this.fileUsesLoggerLibrary(context);
+
     traverse(context.sourceFile, (node) => {
       if (ts.isCallExpression(node)) {
         const issue = this.checkConsoleCall(node, context);
         if (issue) {
+          // If the file uses a proper logger, only keep findings about sensitive data —
+          // non-sensitive console calls in logger-adjacent files are likely intentional
+          if (hasLoggerImport && issue.confidence !== 'high') {
+            return;
+          }
           issues.push(issue);
         }
       }
@@ -91,15 +99,12 @@ export class ConsoleInProductionDetector extends BaseEngine {
 
     let message = `console.${methodName}() in production code`;
     let severity: 'error' | 'warning' = 'warning';
-    let confidence: 'high' | 'medium' | 'low' = 'medium';
+    let confidence: 'high' | 'medium' | 'low' = 'low';
 
     if (sensitivity.isSensitive) {
       message = `console.${methodName}() logging potentially sensitive data: ${sensitivity.reason}`;
       severity = 'error';
       confidence = 'high'; // High confidence for sensitive data
-    } else if (methodName === 'error') {
-      // console.error might be intentional for error logging
-      confidence = 'low';
     } else if (this.isInRouteHandler(node)) {
       // Console in route handlers is more likely a bug
       confidence = 'high';
@@ -169,6 +174,31 @@ export class ConsoleInProductionDetector extends BaseEngine {
   }
 
   /**
+   * Check if the file imports an established logging library.
+   * When true, non-sensitive console calls are suppressed (likely intentional alongside the logger).
+   * Sensitive-data console calls are still reported regardless.
+   */
+  private fileUsesLoggerLibrary(context: AnalysisContext): boolean {
+    // Only the established production-grade loggers from the spec.
+    // General-purpose utilities like `debug` are intentionally excluded —
+    // they're too commonly imported for one-off use to reliably signal "proper logging".
+    const loggerPackages = new Set([
+      'winston', 'pino', 'bunyan', 'log4js', 'loglevel',
+      'signale', 'tslog', 'roarr',
+    ]);
+
+    const imports = getImports(context.sourceFile);
+    return imports.some(imp => {
+      // Handle scoped packages like @org/pino → still extract 'pino' if needed,
+      // but these loggers are not scoped so a simple split is sufficient.
+      const pkg = imp.moduleName.startsWith('@')
+        ? imp.moduleName          // keep full scoped name for future entries
+        : imp.moduleName.split('/')[0];
+      return loggerPackages.has(pkg);
+    });
+  }
+
+  /**
    * Check if file is a development/debug utility
    * Enhanced with context-aware detection
    */
@@ -187,7 +217,8 @@ export class ConsoleInProductionDetector extends BaseEngine {
       /\/debug\//,
       /\/scripts\//,
       /\/tools\//,
-      /\/cli\./,
+      /\/bin\//,
+      /\/cli[./]/,
       /debug\.ts$/,
       /logger\.ts$/,  // Logger implementations are allowed to use console
       /log\.ts$/,

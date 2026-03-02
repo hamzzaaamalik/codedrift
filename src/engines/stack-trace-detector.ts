@@ -98,7 +98,7 @@ export class StackTraceDetector extends BaseEngine {
       if (ts.isCallExpression(current) && ts.isPropertyAccessExpression(current.expression)) {
         const obj = current.expression.expression;
         const method = current.expression.name.text;
-        const responseObjects = ['res', 'response', 'reply', 'ctx'];
+        const responseObjects = ['res', 'response', 'reply', 'ctx', 'h'];
         const responseMethods = ['json', 'send', 'end', 'write'];
         // Match hardcoded names OR the Express-detected param name
         if (ts.isIdentifier(obj) &&
@@ -112,6 +112,14 @@ export class StackTraceDetector extends BaseEngine {
         if (ts.isIdentifier(current.left.expression) &&
             ['ctx', 'res', 'response'].includes(current.left.expression.text) &&
             ['body', 'data'].includes(current.left.name.text)) {
+          return true;
+        }
+      }
+      // NextResponse.json() — Next.js App Router pattern
+      if (ts.isCallExpression(current) && ts.isPropertyAccessExpression(current.expression)) {
+        const obj = current.expression.expression;
+        const method = current.expression.name.text;
+        if (ts.isIdentifier(obj) && obj.text === 'NextResponse' && ['json', 'error'].includes(method)) {
           return true;
         }
       }
@@ -239,7 +247,7 @@ export class StackTraceDetector extends BaseEngine {
     }
 
     // Common response object names
-    const responseObjects = ['res', 'response', 'reply'];
+    const responseObjects = ['res', 'response', 'reply', 'h'];
 
     return objectName ? responseObjects.includes(objectName) : false;
   }
@@ -491,7 +499,7 @@ export class StackTraceDetector extends BaseEngine {
   private isExpressRouteCall(call: ts.CallExpression): boolean {
     if (!ts.isPropertyAccessExpression(call.expression)) return false;
     const method = call.expression.name.text;
-    const httpMethods = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'use', 'all', 'route', 'param'];
+    const httpMethods = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head', 'use', 'all', 'route', 'param', 'register'];
     return httpMethods.includes(method);
   }
 

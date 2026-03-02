@@ -9,7 +9,7 @@
 import { BaseEngine } from './base-engine.js';
 import { AnalysisContext, Issue } from '../types/index.js';
 import { getImports, traverse } from '../core/parser.js';
-import { isNodeBuiltin, extractPackageName, isRelativeOrAbsoluteImport } from '../utils/file-utils.js';
+import { isNodeBuiltin, extractPackageName, isRelativeOrAbsoluteImport, isPathAlias } from '../utils/file-utils.js';
 import { checkTyposquat, hasTyposquatPattern } from '../utils/typosquat-detector.js';
 import * as ts from 'typescript';
 
@@ -38,6 +38,16 @@ export class HallucinatedDepsDetector extends BaseEngine {
 
       // Skip relative/absolute imports
       if (isRelativeOrAbsoluteImport(imp.moduleName)) {
+        continue;
+      }
+
+      // Skip universal path alias patterns (@/, ~/, #, virtual:, query imports)
+      if (isPathAlias(imp.moduleName)) {
+        continue;
+      }
+
+      // Skip tsconfig.json path aliases loaded at scan start
+      if (context.pathAliases && isTsConfigAlias(imp.moduleName, context.pathAliases)) {
         continue;
       }
 
@@ -122,6 +132,8 @@ export class HallucinatedDepsDetector extends BaseEngine {
             : packageResolver.packageExists(packageName);
 
           if (!isRelativeOrAbsoluteImport(moduleName) &&
+              !isPathAlias(moduleName) &&
+              !(context.pathAliases && isTsConfigAlias(moduleName, context.pathAliases)) &&
               !isNodeBuiltin(packageName) &&
               !exists) {
 
@@ -174,4 +186,20 @@ export class HallucinatedDepsDetector extends BaseEngine {
     return issues;
   }
 
+}
+
+/**
+ * Check if a module name matches any of the tsconfig path alias prefixes.
+ * Alias prefixes ending with "/" are wildcard matches (e.g., "@/" matches "@/utils").
+ * Alias prefixes without "/" are exact matches (e.g., "@config" matches only "@config").
+ */
+function isTsConfigAlias(moduleName: string, aliases: Set<string>): boolean {
+  for (const alias of aliases) {
+    if (alias.endsWith('/')) {
+      if (moduleName.startsWith(alias)) return true;
+    } else {
+      if (moduleName === alias) return true;
+    }
+  }
+  return false;
 }

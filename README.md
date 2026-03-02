@@ -381,16 +381,30 @@ jobs:
 npx codedrift
 ```
 
-Displays grouped issues with priorities:
+Smart summary — severity breakdown, top 5 issues, and timing:
 
 ```
-CRITICAL Issues (3)
-  1. src/api/users.ts:23 - IDOR vulnerability
-  2. src/api/orders.ts:45 - Missing input validation
-  3. src/config/aws.ts:12 - Hardcoded AWS key
+📊 Analysis Complete
 
-Warnings (5)
-  Console in Production: 5 findings in 3 files
+  🔴 Critical:                 3    ← Fix these first!
+  🟠 High:                     5
+  🟡 Medium:                   0
+  🔵 Low:                      0
+  ──────────────────────────────
+  Total:                       8 (high confidence only)
+
+🎯 Top 5 Issues to Fix:
+
+  1.  🔴 Missing Input Validation (src/api/users.ts:23)
+      API route uses req.body without validation
+  2.  🔴 IDOR (src/api/orders.ts:45)
+      Database query using user-supplied ID without authorization check
+  3.  🔴 Hardcoded Secret (src/config/aws.ts:12)
+      Hardcoded AWS access key detected
+
+💡 Run with --details to see all issues
+
+Analyzed 42 files in 0.41s (102 files/sec)
 ```
 
 ### JSON
@@ -403,11 +417,39 @@ Machine-readable format for CI/CD pipelines and custom tooling.
 
 ### HTML
 
+Automatically generated on every local run — no flags needed:
+
 ```bash
-npx codedrift --output report.html
+npx codedrift
+# → Report: codedrift-report.html (open in browser)
 ```
 
-Interactive report with filtering and grouping. Can also be generated interactively after terminal analysis.
+Or write to a custom path:
+
+```bash
+npx codedrift --output my-report.html
+```
+
+Interactive report with filtering, grouping, and search. In CI (any `CI` env var or non-TTY), HTML is not auto-generated — use `--output` explicitly if you need it as an artifact.
+
+### SARIF
+
+For GitHub Code Scanning and other SAST integrations:
+
+```bash
+npx codedrift --format sarif --output results.sarif
+```
+
+Upload to GitHub:
+
+```yaml
+- run: npx codedrift --format sarif --output results.sarif
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: results.sarif
+```
+
+Results appear under **Security → Code scanning alerts** in your repository.
 
 ## Baseline Mode
 
@@ -440,7 +482,7 @@ dangerousOperation(); // codedrift-disable-line
 codedrift [options]
 
 Options:
-  --format <type>               Output format: summary, detailed, compact, json, html
+  --format <type>               Output format: summary, detailed, compact, json, html, sarif
   --output <file>               Write report to file
   --baseline                    Save current issues as baseline
   --compare-baseline            Show only new issues since baseline
@@ -482,7 +524,7 @@ CodeDrift uses the TypeScript Compiler API to parse source code into an AST with
 Architecture:
 - **Parser**: Converts code to AST; files are parsed once and cached — never read twice per run
 - **Engines**: Pattern detectors with multi-level confidence scoring. Each engine walks the AST and classifies findings by severity and confidence before they surface
-- **Formatter**: Outputs results as terminal, JSON, or HTML
+- **Formatter**: Outputs results as terminal (summary/detailed/compact), JSON, HTML, or SARIF
 - **CLI**: Orchestrates analysis, handles exit codes, and integrates with CI/CD pipelines
 
 Engine highlights:

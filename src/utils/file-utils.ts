@@ -286,6 +286,30 @@ export function isRelativeOrAbsoluteImport(moduleName: string): boolean {
 }
 
 /**
+ * Check if a module specifier is a path alias or non-npm import.
+ * These are never valid npm package names and should never be flagged as
+ * hallucinated dependencies.
+ *
+ * Covers:
+ *   @/anything   — Universal @/ alias (Next.js, Vite, Create React App, etc.)
+ *   ~/anything   — Nuxt.js, Remix, some custom configs
+ *   #anything    — Node.js subpath imports (package.json "imports" field) and #/ aliases
+ *   virtual:*    — Vite virtual modules (vite-plugin-pwa, etc.)
+ *   *?*          — Vite/webpack query string imports (style.css?inline)
+ *
+ * @param moduleName - Module specifier
+ * @returns true if the import is a path alias or non-npm import
+ */
+export function isPathAlias(moduleName: string): boolean {
+  if (moduleName.startsWith('@/')) return true;   // @/ alias (never a valid npm scope)
+  if (moduleName.startsWith('~/')) return true;   // ~/ alias
+  if (moduleName.startsWith('#')) return true;    // Node.js subpath imports and #/ aliases
+  if (moduleName.startsWith('virtual:')) return true; // Vite virtual modules
+  if (moduleName.includes('?')) return true;      // Query string imports (style.css?inline)
+  return false;
+}
+
+/**
  * Check if a module is a Node.js built-in module
  *
  * @param moduleName - Module name

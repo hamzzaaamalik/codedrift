@@ -67,10 +67,10 @@ export function formatSummary(
   const medIcon = useEmoji ? '🟡' : '[MEDIUM]';
   const lowIcon = getSeverityIcon('info', useEmoji);
 
-  const critText = `${critIcon} Critical Issues:`;
-  const highText = `${highIcon} High Severity:`;
-  const medText = `${medIcon} Medium Severity:`;
-  const lowText = `${lowIcon} Low Severity:`;
+  const critText = `${critIcon} Critical:`;
+  const highText = `${highIcon} High:`;
+  const medText = `${medIcon} Medium:`;
+  const lowText = `${lowIcon} Low:`;
 
   const pad = 24;
   output += `  ${critText.padEnd(pad, ' ')}${red(criticalIssues.length.toString().padStart(6))}`;
@@ -133,7 +133,7 @@ export function formatSummary(
       output += `  ${(index + 1)}.  ${icon} ${color(engineName)} ${gray(`(${location})`)}\n`;
 
       if (issue.message && index < 3) {
-        output += `      ${gray(truncateMessage(issue.message, 70))}\n`;
+        output += `      ${gray(issue.message)}\n`;
       }
     });
 
@@ -149,8 +149,6 @@ export function formatSummary(
     const hintIcon = useEmoji ? '💡 ' : '';
     output += gray(`${hintIcon}Run with --details to see all issues\n`);
 
-    const htmlIcon = useEmoji ? '📄 ' : '';
-    output += gray(`${htmlIcon}HTML report: codedrift-report.html\n`);
   }
 
   // Stats
@@ -186,14 +184,4 @@ function truncateFilePath(filePath: string, maxLength: number = 50): string {
   }
 
   return '...' + filePath.slice(-(maxLength - 3));
-}
-
-/**
- * Truncate message for display
- */
-function truncateMessage(message: string, maxLength: number): string {
-  if (message.length <= maxLength) {
-    return message;
-  }
-  return message.slice(0, maxLength - 3) + '...';
 }

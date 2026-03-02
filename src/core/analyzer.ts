@@ -5,6 +5,7 @@ import { clearASTCache } from './ast-parser.js';
 import { getAllEngines } from '../engines/index.js';
 import { loadConfig, isRuleEnabled, getRuleSeverity, meetsConfidenceThreshold } from './config.js';
 import { PackageResolver, GitIgnoreParser, isTestFile } from '../utils/index.js';
+import { loadPathAliases } from '../utils/tsconfig-resolver.js';
 import { enrichIssueWithRisk } from './risk-scorer.js';
 import { adjustSeverities } from './severity-adjuster.js';
 import { deduplicateIssues } from './deduplicator.js';
@@ -49,6 +50,9 @@ export async function analyzeProject(_options: AnalyzeOptions): Promise<Analysis
   // Reset ESTree AST cache for this run (prevents stale entries across runs)
   clearASTCache();
 
+  // Load TypeScript path aliases once per scan (prevents false positives in hallucinated-deps)
+  const pathAliases = loadPathAliases(cwd);
+
   // Discover files
   const allDiscoveredFiles = await discoverFiles(cwd, config, gitignoreParser);
 
@@ -83,6 +87,7 @@ export async function analyzeProject(_options: AnalyzeOptions): Promise<Analysis
         filePath,
         content,
         packageResolver: packageResolver || undefined,
+        pathAliases,
         metadata: {
           isTestFile: isTest,
           workspaceName,

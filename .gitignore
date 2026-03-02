@@ -40,3 +40,6 @@ test-report.html
 
 # OS
 Thumbs.db
+
+# Planning/spec documents
+*.pdf

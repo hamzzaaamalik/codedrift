@@ -202,13 +202,25 @@ export class MissingInputValidationDetector extends BaseEngine {
           confidence = 'low';
         }
 
+        // Collect specific field names accessed from this source
+        const normalizedSource = usage.source.replace(' (destructured)', '');
+        const sourceKey = normalizedSource.startsWith('req.')
+          ? (normalizedSource.slice(4) as 'body' | 'params' | 'query' | 'headers')
+          : null;
+        const fields = sourceKey ? this.collectFieldNames(handler.node, sourceKey) : [];
+        const fieldSuffix = fields.length > 0 ? `.{ ${fields.join(', ')} }` : '';
+
+        const suggestion = fields.length > 0
+          ? `${normalizedSource}${fieldSuffix} used without validation — add zod, joi, or yup to validate these fields before use`
+          : `Add input validation using joi, zod, yup, class-validator, or express-validator before using ${normalizedSource}`;
+
         const issue = this.createIssue(
           context,
           usage.node,
           `API route uses ${usage.source} without validation - ${usage.risk}`,
           {
             severity: 'error',
-            suggestion: `Add input validation using joi, zod, yup, class-validator, or express-validator before using ${usage.source}`,
+            suggestion,
             confidence,
           }
         );
@@ -395,6 +407,48 @@ export class MissingInputValidationDetector extends BaseEngine {
     // For now, we'll assume no middleware validation
 
     return hasValidation;
+  }
+
+  /**
+   * Collect the specific field names accessed from a request source within a handler.
+   * e.g. req.body.amount, req.body.currency → ['amount', 'currency']
+   *      const { amount, currency } = req.body → ['amount', 'currency']
+   */
+  private collectFieldNames(
+    handlerNode: ts.Node,
+    sourceKey: 'body' | 'params' | 'query' | 'headers',
+  ): string[] {
+    const fields = new Set<string>();
+
+    traverse(handlerNode, (n) => {
+      // req.body.fieldName — the outer PropertyAccess whose object is req.body
+      if (ts.isPropertyAccessExpression(n) && ts.isPropertyAccessExpression(n.expression)) {
+        const inner = n.expression;
+        if (
+          inner.name.text === sourceKey &&
+          ts.isIdentifier(inner.expression) &&
+          inner.expression.text.match(/^req(uest)?$/)
+        ) {
+          fields.add(n.name.text);
+        }
+      }
+
+      // const { field1, field2 } = req.body
+      if (
+        ts.isVariableDeclaration(n) &&
+        n.initializer &&
+        ts.isObjectBindingPattern(n.name) &&
+        n.initializer.getText().match(new RegExp(`req(uest)?\\.${sourceKey}`))
+      ) {
+        for (const element of n.name.elements) {
+          if (ts.isIdentifier(element.name)) {
+            fields.add(element.name.text);
+          }
+        }
+      }
+    });
+
+    return [...fields];
   }
 
   /**

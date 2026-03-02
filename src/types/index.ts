@@ -50,6 +50,12 @@ export interface AnalysisContext {
   packageResolver?: PackageResolver;
   /** Partial metadata to be merged into issue metadata */
   metadata?: Partial<IssueMetadata>;
+  /**
+   * TypeScript path alias prefixes loaded from tsconfig.json at scan start.
+   * e.g. { "@/", "@components/", "@config" }
+   * Used to prevent hallucinated-deps from flagging internal path aliases.
+   */
+  pathAliases?: Set<string>;
 }
 
 /**

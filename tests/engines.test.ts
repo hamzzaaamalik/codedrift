@@ -259,6 +259,60 @@ describe('SecretDetector', () => {
   });
 });
 
+describe('SecretDetector - URL-form secrets', () => {
+  const engine = new SecretDetector();
+
+  test('should detect Slack webhook URL', async () => {
+    const code = `const url = 'https://hooks.slack.com/services/TABCDE123/BABCDE123/abcdefghijklmnop123456';`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Should detect Slack webhook in URL string');
+  });
+
+  test('should detect Discord webhook URL', async () => {
+    const code = `const url = 'https://discordapp.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOP';`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Should detect Discord webhook in URL string');
+  });
+
+  test('should detect PostgreSQL connection URL with credentials', async () => {
+    const code = `const db = 'postgresql://admin:s3cr3tpassword@prod-host.example.com/mydb';`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Should detect PostgreSQL credentials in URL');
+  });
+
+  test('should detect MongoDB connection URL with credentials', async () => {
+    const code = `const uri = 'mongodb+srv://user:hunter2@cluster.example.mongodb.net/mydb';`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Should detect MongoDB credentials in URL');
+  });
+
+  test('should detect Sentry DSN', async () => {
+    const code = `const dsn = 'https://abcdef1234567890abcdef1234567890@o123456.ingest.sentry.io/1234567';`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Should detect Sentry DSN');
+  });
+
+  test('should detect Stripe test key (sk_test_)', async () => {
+    const key = 'sk_test_' + '4eC39HqLyjWDarjtT1zdp7dc'; // split to avoid push-protection false positive
+    const code = `const key = '${key}';`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Should detect sk_test_ Stripe key — test keys are still secrets');
+  });
+
+  test('should not flag a non-credential file path string', async () => {
+    const code = `const file = 'src/migrations/001_create_users.sql';`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.filter(i => i !== null).length, 0, 'Should not flag plain file paths');
+  });
+});
+
 describe('Suppression Comments', () => {
   const engine = new MissingAwaitDetector();
 
