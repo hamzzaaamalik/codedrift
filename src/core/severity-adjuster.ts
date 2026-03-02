@@ -29,10 +29,7 @@ export function adjustSeverity(issue: Issue): Issue | null {
   if (issue.metadata?.isTestFile) {
     // Security issues in tests are still important (hardcoded secrets, etc.)
     const securityEngines = [
-      'secret-detector',
       'hardcoded-secret',
-      'sql-injection-detector',
-      'xss-detector',
     ];
 
     if (!securityEngines.includes(issue.engine)) {

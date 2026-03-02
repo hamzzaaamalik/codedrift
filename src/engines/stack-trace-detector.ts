@@ -34,11 +34,20 @@ export class StackTraceDetector extends BaseEngine {
         }
       }
 
+      // Check for GraphQL formatError stack exposure
+      if (ts.isPropertyAssignment(node) || ts.isMethodDeclaration(node)) {
+        const gqlIssue = this.checkGraphQLFormatError(node, context);
+        if (gqlIssue) {
+          issues.push(gqlIssue);
+          reportedNodes.add(node);
+        }
+      }
+
       // Bottom-up traversal: find err.stack property accesses and classify by context
       if (ts.isPropertyAccessExpression(node) &&
           ts.isIdentifier(node.name) && node.name.text === 'stack' &&
           ts.isIdentifier(node.expression) &&
-          this.isErrorVariableName(node.expression.text)) {
+          (this.isErrorVariableName(node.expression.text) || this.isCatchScopedIdentifier(node.expression as ts.Identifier))) {
         // Skip if already reported via the call-expression path above
         if (this.isNodeInsideReportedNode(node, reportedNodes)) {
           return;
@@ -51,6 +60,10 @@ export class StackTraceDetector extends BaseEngine {
 
         // Stack trace going to an HTTP response — severity error
         if (this.isInResponseContext(node)) {
+          // Skip if inside a development guard
+          if (this.isInDevelopmentGuard(node)) {
+            return;
+          }
           const issue = this.createIssue(
             context,
             node,
@@ -189,6 +202,11 @@ export class StackTraceDetector extends BaseEngine {
     const stackInfo = this.containsStackTrace(arg, context.sourceFile);
 
     if (stackInfo.hasStack) {
+      // Skip if inside a development-only conditional block
+      if (this.isInDevelopmentGuard(node)) {
+        return null;
+      }
+
       // Determine confidence based on how explicit the stack trace exposure is
       let confidence: 'high' | 'medium' = 'high';
 
@@ -269,9 +287,8 @@ export class StackTraceDetector extends BaseEngine {
       // Check for .stack property access
       if (ts.isPropertyAccessExpression(node)) {
         if (ts.isIdentifier(node.name) && node.name.text === 'stack') {
-          // Check if it's error.stack, err.stack, e.stack
-          const objName = this.getObjectName(node.expression);
-          if (objName && this.isErrorVariableName(objName)) {
+          // Check if it's error.stack, err.stack, e.stack (catch-scoped)
+          if (this.isErrorVariable(node.expression)) {
             hasStack = true;
             hasExplicitStack = true;
           }
@@ -289,9 +306,10 @@ export class StackTraceDetector extends BaseEngine {
               hasExplicitStack = true;
             }
 
-            // Check property value
+            // Check property value — e.g. { detail: err.stack }
             if (ts.isPropertyAccessExpression(prop.initializer)) {
-              if (ts.isIdentifier(prop.initializer.name) && prop.initializer.name.text === 'stack') {
+              if (ts.isIdentifier(prop.initializer.name) && prop.initializer.name.text === 'stack' &&
+                  this.isErrorVariable(prop.initializer.expression)) {
                 hasStack = true;
                 hasExplicitStack = true;
               }
@@ -303,7 +321,7 @@ export class StackTraceDetector extends BaseEngine {
               hasExplicitStack = true;
             }
             // Check for { error } or { err } shorthand
-            if (ts.isIdentifier(prop.name) && this.isErrorVariableName(prop.name.text)) {
+            if (ts.isIdentifier(prop.name) && (this.isErrorVariableName(prop.name.text) || this.isCatchScopedIdentifier(prop.name))) {
               hasStack = true;
             }
           }
@@ -313,14 +331,14 @@ export class StackTraceDetector extends BaseEngine {
       // Check for spreading error object: { ...err }
       if (ts.isSpreadAssignment(node)) {
         const spreadExpr = node.expression;
-        if (ts.isIdentifier(spreadExpr) && this.isErrorVariableName(spreadExpr.text)) {
+        if (ts.isIdentifier(spreadExpr) && this.isErrorVariable(spreadExpr)) {
           hasStack = true;
           hasExplicitStack = true; // Spreading includes all properties including stack
         }
       }
 
       // Check for direct error variable: res.json(err)
-      if (ts.isIdentifier(node) && node === arg && this.isErrorVariableName(node.text)) {
+      if (ts.isIdentifier(node) && node === arg && (this.isErrorVariableName(node.text) || this.isCatchScopedIdentifier(node))) {
         hasStack = true;
         isSimpleErrorVar = true;
       }
@@ -332,7 +350,7 @@ export class StackTraceDetector extends BaseEngine {
         // String(err)
         if (ts.isIdentifier(callExpr) && callExpr.text === 'String' && node.arguments.length > 0) {
           const arg0 = node.arguments[0];
-          if (ts.isIdentifier(arg0) && this.isErrorVariableName(arg0.text)) {
+          if (ts.isIdentifier(arg0) && this.isErrorVariable(arg0)) {
             hasStack = true;
             hasExplicitStack = true;
           }
@@ -343,21 +361,10 @@ export class StackTraceDetector extends BaseEngine {
             ts.isIdentifier(callExpr.expression) && callExpr.expression.text === 'JSON' &&
             callExpr.name.text === 'stringify' && node.arguments.length > 0) {
           const arg0 = node.arguments[0];
-          if (ts.isIdentifier(arg0) && this.isErrorVariableName(arg0.text)) {
+          if (ts.isIdentifier(arg0) && this.isErrorVariable(arg0)) {
             hasStack = true;
             hasExplicitStack = true;
           }
-        }
-      }
-
-      // Check for err.toString() — includes error message but not stack; medium confidence
-      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-        const propAccess = node.expression;
-        if (propAccess.name.text === 'toString' &&
-            ts.isIdentifier(propAccess.expression) &&
-            this.isErrorVariableName(propAccess.expression.text)) {
-          hasStack = true;
-          // toString() is lower risk than explicit stack but still leaks internals
         }
       }
 
@@ -385,8 +392,47 @@ export class StackTraceDetector extends BaseEngine {
    * Check if variable name is likely an error
    */
   private isErrorVariableName(name: string): boolean {
-    const errorNames = ['error', 'err', 'e', 'exception', 'ex'];
+    const errorNames = ['error', 'err', 'exception', 'ex'];
     return errorNames.includes(name.toLowerCase());
+  }
+
+  /**
+   * Check if an identifier named 'e' is in a catch clause scope (making it an error variable).
+   * Single-letter 'e' is ambiguous — it could be an event, element, or error.
+   * Only treat it as an error when it's the catch clause's bound variable.
+   */
+  private isCatchScopedIdentifier(node: ts.Identifier): boolean {
+    if (node.text !== 'e') return false;
+
+    // Walk up to find if this 'e' comes from a catch clause
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (ts.isCatchClause(current)) {
+        // Check if the catch clause binds a variable named 'e'
+        if (current.variableDeclaration &&
+            ts.isIdentifier(current.variableDeclaration.name) &&
+            current.variableDeclaration.name.text === 'e') {
+          return true;
+        }
+      }
+      // Stop at function boundaries — 'e' from an outer catch doesn't count
+      if (ts.isFunctionDeclaration(current) || ts.isFunctionExpression(current) ||
+          ts.isArrowFunction(current) || ts.isMethodDeclaration(current)) {
+        return false;
+      }
+      current = current.parent;
+    }
+    return false;
+  }
+
+  /**
+   * Check if a node is an error variable — either by name or by catch scope.
+   */
+  private isErrorVariable(node: ts.Expression): boolean {
+    if (ts.isIdentifier(node)) {
+      return this.isErrorVariableName(node.text) || this.isCatchScopedIdentifier(node);
+    }
+    return false;
   }
 
   /**
@@ -528,5 +574,96 @@ export class StackTraceDetector extends BaseEngine {
 
     checkNode(arg);
     return hasSensitive;
+  }
+
+  /**
+   * Check if a formatError property/method exposes stack traces to GraphQL clients.
+   * Pattern: formatError: (err) => ({ message: err.message, stack: err.stack })
+   */
+  private checkGraphQLFormatError(node: ts.PropertyAssignment | ts.MethodDeclaration, context: AnalysisContext): Issue | null {
+    // Get the property/method name
+    let name: string | null = null;
+    if (ts.isPropertyAssignment(node)) {
+      name = this.getPropertyName(node.name);
+    } else if (node.name && ts.isIdentifier(node.name)) {
+      name = node.name.text;
+    }
+    if (name !== 'formatError') return null;
+
+    // Get the function body
+    let body: ts.Node | undefined;
+    if (ts.isPropertyAssignment(node)) {
+      const init = node.initializer;
+      if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
+        body = init.body;
+      }
+    } else if (ts.isMethodDeclaration(node)) {
+      body = node.body;
+    }
+    if (!body) return null;
+
+    // Check if body references .stack or spreads error object
+    let hasStack = false;
+    traverse(body, (n) => {
+      if (hasStack) return;
+      if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.name) && n.name.text === 'stack') {
+        hasStack = true;
+      }
+      if (ts.isSpreadAssignment(n) && ts.isIdentifier(n.expression) && this.isErrorVariableName(n.expression.text)) {
+        hasStack = true;
+      }
+    });
+
+    if (!hasStack) return null;
+
+    // Skip if inside a development guard
+    if (this.isInDevelopmentGuard(node)) return null;
+
+    return this.createIssue(context, node, 'GraphQL formatError exposes stack trace to clients', {
+      severity: 'error',
+      suggestion: 'Remove stack trace from formatError. Return only message and code. Log the full error server-side.',
+      confidence: 'high',
+    });
+  }
+
+  /**
+   * Check if a node is inside a development-only conditional block.
+   * e.g., if (process.env.NODE_ENV !== 'production') { res.json({ stack: err.stack }); }
+   */
+  private isInDevelopmentGuard(node: ts.Node): boolean {
+    let current = node.parent;
+    while (current) {
+      if (ts.isIfStatement(current)) {
+        const condText = current.expression.getText();
+        const devGuardPatterns = [
+          /NODE_ENV\s*(!==|!=)\s*['"]production['"]/,
+          /NODE_ENV\s*(===|==)\s*['"]development['"]/,
+          /NODE_ENV\s*(===|==)\s*['"]dev['"]/,
+          /isDevelopment/i,
+          /isDebug/i,
+          /__DEV__/,
+        ];
+        if (devGuardPatterns.some(p => p.test(condText))) {
+          if (this.isInThenBranch(node, current)) {
+            return true;
+          }
+        }
+      }
+      current = current.parent;
+    }
+    return false;
+  }
+
+  /**
+   * Check if a node is in the then-branch (not the else-branch) of an if statement.
+   */
+  private isInThenBranch(node: ts.Node, ifStatement: ts.IfStatement): boolean {
+    let current: ts.Node | undefined = node;
+    while (current && current !== ifStatement) {
+      if (current === ifStatement.thenStatement) return true;
+      if (current === ifStatement.elseStatement) return false;
+      current = current.parent;
+    }
+    return false;
   }
 }

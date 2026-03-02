@@ -14,6 +14,7 @@
 import { BaseEngine } from './base-engine.js';
 import { AnalysisContext, Issue } from '../types/index.js';
 import { traverse } from '../core/parser.js';
+import { calculateEntropy } from '../utils/file-utils.js';
 import * as ts from 'typescript';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
@@ -187,6 +188,16 @@ export class SecretDetector extends BaseEngine {
         const issue = this.checkStringLiteral(node, context);
         if (issue) issues.push(issue);
       }
+      // Template literals without interpolation are equivalent to string literals
+      if (ts.isNoSubstitutionTemplateLiteral(node)) {
+        const issue = this.checkTemplateLiteral(node, context);
+        if (issue) issues.push(issue);
+      }
+      // Template literals with interpolation — check head for known prefixes
+      if (ts.isTemplateExpression(node)) {
+        const issue = this.checkTemplateHead(node, context);
+        if (issue) issues.push(issue);
+      }
     });
 
     return issues;
@@ -218,7 +229,7 @@ export class SecretDetector extends BaseEngine {
     }
 
     // ── Layers 3 & 4 need Shannon entropy ─────────────────────────────────
-    const entropy = this.calculateEntropy(value);
+    const entropy = calculateEntropy(value);
 
     // ── Layer 3 : Regex patterns ───────────────────────────────────────────
     for (const { pattern, provider, type, severity, minimumEntropy } of REGEX_PATTERNS) {
@@ -262,6 +273,76 @@ export class SecretDetector extends BaseEngine {
           if (issue?.metadata) issue.metadata.entropy = entropy;
           return issue;
         }
+      }
+    }
+
+    return null;
+  }
+
+  /** Check a no-substitution template literal (backtick string without interpolation). */
+  private checkTemplateLiteral(node: ts.NoSubstitutionTemplateLiteral, context: AnalysisContext): Issue | null {
+    const value = node.text;
+    if (value.length < 8) return null;
+    if (this.shouldSkip(value, node as unknown as ts.StringLiteral)) return null;
+
+    // Run the same detection pipeline as string literals
+    // Layer 1: Prefix match
+    for (const [prefix, entry] of SORTED_PREFIXES) {
+      if (!value.startsWith(prefix)) continue;
+      if (entry.minLength !== undefined && value.length < entry.minLength) continue;
+      if (entry.bodyRegex && !entry.bodyRegex.test(value.slice(prefix.length))) continue;
+      return this.buildIssue(context, node, entry.provider, entry.type, entry.severity, 'high');
+    }
+
+    // Layer 2: URL patterns
+    for (const { regex, provider, type, severity } of URL_PATTERNS) {
+      if (regex.test(value)) {
+        return this.buildIssue(context, node, provider, type, severity, 'high');
+      }
+    }
+
+    // Layer 3 & 4: Entropy-based
+    const entropy = calculateEntropy(value);
+
+    for (const { pattern, provider, type, severity, minimumEntropy } of REGEX_PATTERNS) {
+      if (!pattern.test(value)) continue;
+      if (minimumEntropy !== undefined && entropy < minimumEntropy) continue;
+      return this.buildIssue(context, node, provider, type, severity, 'high', entropy);
+    }
+
+    // Layer 4: Entropy + variable name
+    if (value.length >= 20 && entropy > 4.5 && !/\s/.test(value)) {
+      if (this.isTestValue(value)) return null;
+      // Reuse variable name extraction (parent structure is the same)
+      const varName = this.getVariableName(node as unknown as ts.StringLiteral);
+      if (varName && SENSITIVE_VAR_NAMES.test(varName)) {
+        const envVar = varName.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+        return this.createIssue(context, node, `Potential hardcoded secret in variable '${varName}'`, {
+          severity: 'warning', confidence: 'medium',
+          suggestion: `Move the value to process.env.${envVar} or a secret manager`,
+        });
+      }
+    }
+
+    return null;
+  }
+
+  /** Check the head of a template expression for known secret prefixes. */
+  private checkTemplateHead(node: ts.TemplateExpression, context: AnalysisContext): Issue | null {
+    const headText = node.head.text;
+    if (headText.length < 4) return null;
+
+    // Only check Layer 1 prefix matches — the full value is unknown at compile time
+    for (const [prefix, entry] of SORTED_PREFIXES) {
+      if (!headText.startsWith(prefix)) continue;
+      // For template expressions, we can't check minLength/bodyRegex since the full value is unknown
+      return this.buildIssue(context, node, entry.provider, entry.type, entry.severity, 'medium');
+    }
+
+    // Check URL patterns on the head text (connection strings often start in the head)
+    for (const { regex, provider, type, severity } of URL_PATTERNS) {
+      if (regex.test(headText)) {
+        return this.buildIssue(context, node, provider, type, severity, 'medium');
       }
     }
 
@@ -331,30 +412,15 @@ export class SecretDetector extends BaseEngine {
   }
 
   /**
-   * Shannon entropy of a string.
-   * 0 = no randomness, ~8 = maximum randomness.
-   * Secrets/tokens typically score > 4.5.
-   */
-  private calculateEntropy(str: string): number {
-    if (str.length === 0) return 0;
-    const freq = new Map<string, number>();
-    for (const char of str) freq.set(char, (freq.get(char) ?? 0) + 1);
-    let entropy = 0;
-    for (const count of freq.values()) {
-      const p = count / str.length;
-      entropy -= p * Math.log2(p);
-    }
-    return entropy;
-  }
-
-  /**
    * URL-form strings (https://, postgres://, etc.) are NEVER treated as file paths —
    * they may carry embedded credentials (Slack webhooks, DB URLs, Sentry DSNs).
    */
   private isFilePath(value: string): boolean {
     if (/^[a-zA-Z][a-zA-Z0-9+\-.]*:\/\//.test(value)) return false;
     if (value.includes('/') || value.includes('\\')) return true;
-    const fileExtensions = /\.(sql|json|ts|tsx|js|jsx|py|rb|go|java|cs|php|html|css|md|yml|yaml|xml|csv|txt|sh|bash|env|lock|toml|ini|cfg|conf|log)$/i;
+    // Relative path prefixes
+    if (value.startsWith('./') || value.startsWith('../')) return true;
+    const fileExtensions = /\.(sql|json|ts|tsx|js|jsx|py|rb|rs|go|java|cs|php|html|css|md|yml|yaml|xml|csv|txt|sh|bash|env|lock|toml|ini|cfg|conf|log)$/i;
     return fileExtensions.test(value);
   }
 
@@ -369,12 +435,20 @@ export class SecretDetector extends BaseEngine {
     else if (ts.isPropertyAccessExpression(expr)) funcName = expr.name.text;
     if (!funcName) return false;
     const safeFileFunctions = new Set([
-      'join', 'resolve', 'dirname', 'basename', 'extname',
+      // path module
+      'join', 'resolve', 'relative', 'dirname', 'basename', 'extname',
+      // fs module
       'readFile', 'readFileSync', 'writeFile', 'writeFileSync',
       'appendFile', 'appendFileSync', 'existsSync', 'statSync',
       'mkdirSync', 'copyFile', 'rename', 'unlink',
-      'require', 'runMigration', 'execFile', 'spawn',
-      'createReadStream', 'createWriteStream', 'glob',
+      'access', 'accessSync', 'stat', 'lstat', 'lstatSync',
+      'createReadStream', 'createWriteStream',
+      // require / dynamic import
+      'require',
+      // migration and process execution
+      'runMigration', 'migrate', 'execFile', 'spawn', 'exec',
+      // glob/file search
+      'glob',
     ]);
     return safeFileFunctions.has(funcName);
   }

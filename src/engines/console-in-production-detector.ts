@@ -14,7 +14,7 @@
 import { BaseEngine } from './base-engine.js';
 import { AnalysisContext, Issue } from '../types/index.js';
 import { traverse, getImports } from '../core/parser.js';
-import { isCLIFile, isMigrationFile } from '../utils/file-utils.js';
+import { isCLIFile, isMigrationFile, isConfigFile } from '../utils/file-utils.js';
 import * as ts from 'typescript';
 
 export class ConsoleInProductionDetector extends BaseEngine {
@@ -78,8 +78,25 @@ export class ConsoleInProductionDetector extends BaseEngine {
       return null;
     }
 
-    // Check if it's a logging method
-    const loggingMethods = ['log', 'warn', 'error', 'info', 'debug', 'trace', 'dir', 'table'];
+    // Debug utility methods get lower severity — they're debug instrumentation, not logging
+    const debugMethods = ['table', 'time', 'timeEnd', 'timeLog', 'count', 'countReset', 'group', 'groupEnd'];
+    if (debugMethods.includes(methodName)) {
+      // Still check if in development block
+      if (this.isInDevelopmentBlock(node)) {
+        return null;
+      }
+      if (this.isInsideLoggerClass(node)) {
+        return null;
+      }
+      return this.createIssue(context, node, `console.${methodName}() is a debug utility left in production code`, {
+        severity: 'info',
+        suggestion: `Remove console.${methodName}() — it's debug instrumentation, not logging.`,
+        confidence: 'medium',
+      });
+    }
+
+    // Check if it's a logging method (after debug methods are handled above)
+    const loggingMethods = ['log', 'warn', 'error', 'info', 'debug', 'trace', 'dir'];
     if (!loggingMethods.includes(methodName)) {
       return null;
     }
@@ -210,6 +227,10 @@ export class ConsoleInProductionDetector extends BaseEngine {
 
     if (isMigrationFile(filePath)) {
       return true; // Migration files often use console for progress/logging
+    }
+
+    if (isConfigFile(filePath)) {
+      return true; // Config/build files legitimately use console for output
     }
 
     const devPatterns = [

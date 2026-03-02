@@ -51,7 +51,8 @@ export const POPULAR_PACKAGES = [
 
   // Cloud SDKs and services
   'aws-sdk', 'firebase', 'firebase-admin', 'stripe', 'twilio', 'sendgrid',
-  'nodemailer', 'mailchimp', 'sendbird', 'pusher',
+  '@sendgrid/mail', 'nodemailer', 'mailchimp', 'sendbird', 'pusher',
+  '@tanstack/react-query',
 
   // Validation and schema
   'zod', 'yup', 'joi', 'class-validator', 'ajv', 'superstruct', 'io-ts',
@@ -73,6 +74,8 @@ export const POPULAR_PACKAGES = [
   'winston', 'pino', 'bunyan', 'log4js', 'morgan',
   'pm2', 'nodemon', 'concurrently',
   'js-yaml', 'yaml', 'toml', 'ini',
+  'compression', 'ioredis', 'kafkajs',
+  'cookie-parser', 'body-parser', 'express-session', 'express-validator',
 ];
 
 /**
@@ -122,6 +125,17 @@ export const KNOWN_ATTACK_PACKAGES: Map<string, string> = new Map([
   ['nuxtjs', 'nuxt'],
   ['gatbsy', 'gatsby'],
   ['remmix', 'remix'],
+  ['node-mailer', 'nodemailer'],
+  ['lodashs', 'lodash'],
+  ['reactjs', 'react'],
+  ['webapack', 'webpack'],
+  ['coffescript', 'coffeescript'],
+  ['coffe-script', 'coffeescript'],
+  ['gruntcli', 'grunt-cli'],
+  ['gulp-cli', 'gulp'],
+  ['jquerry', 'jquery'],
+  ['jquery.js', 'jquery'],
+  ['tkinter', 'tk'],
 ]);
 
 /**
@@ -179,6 +193,15 @@ export function checkTyposquat(packageName: string): {
   const knownTarget = KNOWN_ATTACK_PACKAGES.get(packageName.toLowerCase());
   if (knownTarget) {
     return { isTyposquat: true, targetPackage: knownTarget, distance: 1, confidence: 'high' };
+  }
+
+  // Hyphen/underscore normalization: cross_env vs cross-env
+  const normalizedInput = packageName.toLowerCase().replace(/_/g, '-');
+  for (const popularPkg of POPULAR_PACKAGES) {
+    const normalizedTarget = popularPkg.toLowerCase().replace(/_/g, '-');
+    if (normalizedInput === normalizedTarget && packageName.toLowerCase() !== popularPkg.toLowerCase()) {
+      return { isTyposquat: true, targetPackage: popularPkg, distance: 1, confidence: 'high' as const };
+    }
   }
 
   let closestPackage: string | null = null;

@@ -61,6 +61,12 @@ export class EmptyCatchDetector extends BaseEngine {
         return null;
       }
 
+      // Check if try block contains a known "probe" pattern (fs.access, JSON.parse, etc.)
+      // These patterns intentionally use try-catch for control flow
+      if (this.isExpectedErrorPattern(node)) {
+        return null;
+      }
+
       return this.createIssue(context, catchClause, 'Empty catch block silently swallows errors', {
         severity: inMigration ? 'info' : 'error', // Downgrade for migrations
         suggestion: inMigration
@@ -72,6 +78,12 @@ export class EmptyCatchDetector extends BaseEngine {
 
     // Check if block is effectively empty (only comments)
     if (this.isEffectivelyEmpty(block)) {
+      // Check if try block contains a known "probe" pattern (fs.access, JSON.parse, etc.)
+      // These patterns intentionally use try-catch for control flow
+      if (this.isExpectedErrorPattern(node)) {
+        return null;
+      }
+
       return this.createIssue(context, catchClause, 'Catch block only contains comments - errors swallowed', {
         severity: 'error',
         suggestion: 'Add error logging or handling logic',
@@ -95,6 +107,11 @@ export class EmptyCatchDetector extends BaseEngine {
         suggestion: 'Remove catch or add error context/logging before re-throwing',
         confidence: 'low', // May be placeholder for future logic
       });
+    }
+
+    // Check if error is properly handled (logger, monitoring, passed to function, instanceof)
+    if (this.isErrorHandled(catchClause)) {
+      return null;
     }
 
     // Check if only console.log (not production-ready)
@@ -121,6 +138,116 @@ export class EmptyCatchDetector extends BaseEngine {
     }
 
     return null;
+  }
+
+  /**
+   * Check if the error is properly handled in the catch block:
+   * - Logger calls with error variable (logger.error(err), winston.error(err), etc.)
+   * - Monitoring services (Sentry.captureException(err), newrelic.noticeError(err), etc.)
+   * - Error passed to ANY function call as argument
+   * - instanceof check on the error variable
+   */
+  private isErrorHandled(catchClause: ts.CatchClause): boolean {
+    const variableDecl = catchClause.variableDeclaration;
+    if (!variableDecl) return false;
+
+    const errorName = variableDecl.name;
+    if (!ts.isIdentifier(errorName)) return false;
+
+    const errorVarName = errorName.text;
+    let handled = false;
+
+    traverse(catchClause.block, (node) => {
+      if (handled) return;
+
+      // Check if error variable is passed as argument to any function call
+      if (ts.isCallExpression(node)) {
+        for (const arg of node.arguments) {
+          if (this.containsIdentifier(arg, errorVarName)) {
+            handled = true;
+            return;
+          }
+        }
+      }
+
+      // Check for instanceof check on the error variable
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.InstanceOfKeyword) {
+        if (ts.isIdentifier(node.left) && node.left.text === errorVarName) {
+          handled = true;
+          return;
+        }
+      }
+
+      // Check for throw with wrapping: throw new CustomError('msg', err)
+      if (ts.isThrowStatement(node) && node.expression) {
+        if (ts.isNewExpression(node.expression) && node.expression.arguments) {
+          for (const arg of node.expression.arguments) {
+            if (this.containsIdentifier(arg, errorVarName)) {
+              handled = true;
+              return;
+            }
+          }
+        }
+      }
+    });
+
+    return handled;
+  }
+
+  /**
+   * Recursively check if a node contains a reference to an identifier
+   */
+  private containsIdentifier(node: ts.Node, identifierName: string): boolean {
+    if (ts.isIdentifier(node) && node.text === identifierName) {
+      return true;
+    }
+    let found = false;
+    ts.forEachChild(node, (child) => {
+      if (!found && this.containsIdentifier(child, identifierName)) {
+        found = true;
+      }
+    });
+    return found;
+  }
+
+  /**
+   * Check if the try block contains a known "probe" or "check" pattern where
+   * an empty catch is idiomatic. Examples:
+   * - try { await fs.access(path); } catch { } — check if file exists
+   * - try { JSON.parse(str); } catch { } — try-parse pattern
+   * - try { require('optional-dep'); } catch { } — optional require
+   */
+  private isExpectedErrorPattern(tryStatement: ts.TryStatement): boolean {
+    const tryBlock = tryStatement.tryBlock;
+    // Only applies to simple try blocks (1-2 statements)
+    if (tryBlock.statements.length === 0 || tryBlock.statements.length > 2) return false;
+
+    let hasProbeCall = false;
+    traverse(tryBlock, (node) => {
+      if (hasProbeCall) return;
+      if (ts.isCallExpression(node)) {
+        const callText = node.expression.getText();
+        const probePatterns = [
+          /\bfs\.access/,
+          /\bfs\.stat/,
+          /\bfs\.lstat/,
+          /\bfs\.readFile/,
+          /\bfs\.readdir/,
+          /\bfs\.mkdir/,
+          /\bfs\.unlink/,
+          /\bfs\.rmdir/,
+          /\bJSON\.parse/,
+          /\brequire\s*\(/,
+          /\.exists\b/,
+          /\.ping\b/,
+          /\.connect\b/,
+        ];
+        if (probePatterns.some(p => p.test(callText))) {
+          hasProbeCall = true;
+        }
+      }
+    });
+    return hasProbeCall;
   }
 
   /**

@@ -55,9 +55,9 @@ function isLowPriorityIDOR(issue: Issue): boolean {
     return true;
   }
 
-  // Only flag high-confidence validation issues
-  if (issue.confidence !== 'high') {
-    return true; // Skip medium/low confidence IDOR
+  // Only auto-ignore low-confidence IDOR (medium is still worth reporting)
+  if (issue.confidence === 'low') {
+    return true; // Skip low confidence IDOR
   }
 
   return false;
@@ -83,7 +83,6 @@ function isIntentionalFireAndForget(issue: Issue): boolean {
     'queue', // queueJob()
     'schedule', // scheduleTask()
     'cache', // cacheValue()
-    'update', // updateCounter() - fire and forget
   ];
 
   return fireAndForgetPatterns.some(pattern => message.includes(pattern));

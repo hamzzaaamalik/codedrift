@@ -94,28 +94,28 @@ export async function analyzeProject(_options: AnalyzeOptions): Promise<Analysis
         },
       };
 
-      // Run all engines
-      for (const engine of engines) {
-        // Check if engine is enabled
-        if (!isRuleEnabled(config, engine.name)) {
-          continue;
-        }
+      // Run all enabled engines in parallel
+      const enginePromises = engines
+        .filter(engine => isRuleEnabled(config, engine.name))
+        .map(async engine => {
+          const issues = await engine.analyze(context);
 
-        const issues = await engine.analyze(context);
+          // Filter out null issues (suppressed by comments)
+          const validIssues = issues.filter((issue): issue is Issue => issue !== null);
 
-        // Filter out null issues (suppressed by comments)
-        const validIssues = issues.filter((issue): issue is Issue => issue !== null);
-
-        // Apply rule severity overrides
-        const adjustedIssues = validIssues.map(issue => {
-          const configSeverity = getRuleSeverity(config, engine.name);
-          if (configSeverity) {
-            return { ...issue, severity: configSeverity };
-          }
-          return issue;
+          // Apply rule severity overrides
+          return validIssues.map(issue => {
+            const configSeverity = getRuleSeverity(config, engine.name);
+            if (configSeverity) {
+              return { ...issue, severity: configSeverity };
+            }
+            return issue;
+          });
         });
 
-        allIssues.push(...adjustedIssues);
+      const engineResults = await Promise.all(enginePromises);
+      for (const issues of engineResults) {
+        allIssues.push(...issues);
       }
 
       analyzedCount++;
@@ -135,16 +135,16 @@ export async function analyzeProject(_options: AnalyzeOptions): Promise<Analysis
   const threshold = config.confidenceThreshold || 'medium';
   const filteredIssues = afterAutoIgnore.filter(issue => meetsConfidenceThreshold(issue, threshold));
 
-  // Apply smart severity adjustments based on context
-  let processedIssues = adjustSeverities(filteredIssues);
-
-  // Boost confidence for high-quality issues
-  processedIssues = processedIssues.map(issue => {
+  // Boost confidence for high-quality issues (BEFORE severity adjustment so it takes effect)
+  let processedIssues = filteredIssues.map(issue => {
     if (shouldBoostConfidence(issue) && issue.confidence !== 'high') {
       return { ...issue, confidence: 'high' as const };
     }
     return issue;
   });
+
+  // Apply smart severity adjustments based on context (now uses boosted confidence)
+  processedIssues = adjustSeverities(processedIssues);
 
   // Enrich with risk scores and priority levels
   processedIssues = processedIssues.map(enrichIssueWithRisk);

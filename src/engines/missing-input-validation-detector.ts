@@ -40,12 +40,31 @@ export class MissingInputValidationDetector extends BaseEngine {
   private findRouteHandlers(context: AnalysisContext): RouteHandler[] {
     const handlers: RouteHandler[] = [];
 
+    // Check for global validation middleware (e.g. app.use(validate()))
+    const hasGlobalValidation = this.hasGlobalValidationMiddleware(context.sourceFile);
+
     traverse(context.sourceFile, (node) => {
       // Express/Fastify style: app.get('/path', (req, res) => {})
+      // Also matches Koa style: router.get('/path', (ctx) => {})
       if (ts.isCallExpression(node)) {
         const handler = this.checkExpressStyleRoute(node);
         if (handler) {
-          handlers.push(handler);
+          if (hasGlobalValidation) {
+            // Global validation middleware detected — skip flagging routes in this file
+          } else {
+            handlers.push(handler);
+          }
+          return;
+        }
+
+        const hapiHandler = this.checkHapiStyleRoute(node);
+        if (hapiHandler) {
+          if (hasGlobalValidation) {
+            // Global validation middleware detected — skip flagging routes in this file
+          } else {
+            handlers.push(hapiHandler);
+          }
+          return;
         }
       }
 
@@ -53,7 +72,11 @@ export class MissingInputValidationDetector extends BaseEngine {
       if (ts.isMethodDeclaration(node)) {
         const handler = this.checkNestJSStyleRoute(node);
         if (handler) {
-          handlers.push(handler);
+          if (hasGlobalValidation) {
+            // Global validation middleware detected — skip flagging routes in this file
+          } else {
+            handlers.push(handler);
+          }
         }
       }
     });
@@ -62,10 +85,11 @@ export class MissingInputValidationDetector extends BaseEngine {
   }
 
   /**
-   * Check for Express/Fastify style routes
+   * Check for Express/Fastify/Koa style routes
    * app.get('/path', handler)
    * app.post('/path', middleware, handler)
    * router.put('/path', handler)
+   * router.get('/path', (ctx) => {})  // Koa
    */
   private checkExpressStyleRoute(node: ts.CallExpression): RouteHandler | null {
     const { expression } = node;
@@ -101,11 +125,114 @@ export class MissingInputValidationDetector extends BaseEngine {
       return null;
     }
 
+    // Detect framework by checking handler parameters
+    const framework = this.detectHandlerFramework(lastArg);
+
     return {
       node: lastArg,
-      framework: 'express',
+      framework,
       method: methodName,
       isAsync: this.isAsyncFunction(lastArg),
+      routeCallExpression: node,
+    };
+  }
+
+  /**
+   * Detect framework from handler function parameters.
+   * - (ctx) or (ctx, next) → Koa
+   * - (request, h) → Hapi
+   * - (req, res) or (request, response) → Express
+   */
+  private detectHandlerFramework(handler: ts.ArrowFunction | ts.FunctionExpression): 'express' | 'koa' | 'hapi' {
+    if (handler.parameters.length >= 1) {
+      const firstParam = handler.parameters[0];
+      if (ts.isIdentifier(firstParam.name)) {
+        const firstName = firstParam.name.text.toLowerCase();
+
+        // Koa: (ctx) or (ctx, next)
+        if (firstName === 'ctx') {
+          return 'koa';
+        }
+
+        // Hapi: (request, h)
+        if (handler.parameters.length >= 2 && firstName === 'request') {
+          const secondParam = handler.parameters[1];
+          if (ts.isIdentifier(secondParam.name) && secondParam.name.text.toLowerCase() === 'h') {
+            return 'hapi';
+          }
+        }
+      }
+    }
+
+    return 'express';
+  }
+
+  /**
+   * Check for Hapi style routes
+   * server.route({ method: 'GET', path: '/path', handler: (request, h) => {} })
+   */
+  private checkHapiStyleRoute(node: ts.CallExpression): RouteHandler | null {
+    const { expression } = node;
+
+    if (!ts.isPropertyAccessExpression(expression)) {
+      return null;
+    }
+
+    const objectName = this.getObjectName(expression.expression);
+    const methodName = expression.name.text;
+
+    // Hapi uses server.route()
+    if (methodName !== 'route') {
+      return null;
+    }
+
+    // Check if object is a server
+    if (!objectName || !/^(server|hapi)$/i.test(objectName)) {
+      return null;
+    }
+
+    // First argument should be an object literal with method, path, handler
+    if (node.arguments.length === 0) {
+      return null;
+    }
+
+    const routeConfig = node.arguments[0];
+    if (!ts.isObjectLiteralExpression(routeConfig)) {
+      return null;
+    }
+
+    // Find handler property
+    let handlerNode: ts.Node | null = null;
+    let httpMethod = 'get';
+
+    for (const prop of routeConfig.properties) {
+      if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) {
+        continue;
+      }
+
+      const propName = prop.name.text.toLowerCase();
+
+      if (propName === 'handler') {
+        if (ts.isArrowFunction(prop.initializer) || ts.isFunctionExpression(prop.initializer)) {
+          handlerNode = prop.initializer;
+        }
+      }
+
+      if (propName === 'method' && ts.isStringLiteral(prop.initializer)) {
+        httpMethod = prop.initializer.text.toLowerCase();
+      }
+    }
+
+    if (!handlerNode) {
+      return null;
+    }
+
+    return {
+      node: handlerNode,
+      framework: 'hapi',
+      method: httpMethod,
+      isAsync: this.isAsyncFunction(handlerNode),
+      routeCallExpression: node,
     };
   }
 
@@ -154,6 +281,11 @@ export class MissingInputValidationDetector extends BaseEngine {
   private checkHandlerValidation(handler: RouteHandler, context: AnalysisContext): Issue[] {
     const issues: Issue[] = [];
 
+    // Check if validation middleware is present in the route registration
+    if (handler.routeCallExpression && this.hasValidationMiddleware(handler.routeCallExpression)) {
+      return issues;
+    }
+
     // Check if handler uses request data
     const requestDataUsage = this.findRequestDataUsage(handler.node);
 
@@ -166,6 +298,9 @@ export class MissingInputValidationDetector extends BaseEngine {
     const hasValidation = this.hasValidationInHandler(handler.node, context);
 
     if (!hasValidation) {
+      // Collect fields that have per-field type checks (typeof, instanceof, Array.isArray)
+      const validatedFields = this.getFieldsWithTypeChecks(handler.node);
+
       // Group usages by source type to avoid duplicates
       const sourceTypes = new Set<string>();
       const uniqueUsages: RequestDataUsage[] = [];
@@ -185,29 +320,49 @@ export class MissingInputValidationDetector extends BaseEngine {
         // Determine confidence based on usage type
         let confidence: 'high' | 'medium' | 'low' = 'high';
 
-        // req.body without validation is highly likely to be a vulnerability
-        if (usage.source.includes('req.body') || usage.source.includes('@Body()')) {
+        // Body/payload without validation is highly likely to be a vulnerability
+        if (usage.source.includes('req.body') || usage.source.includes('@Body()') ||
+            usage.source.includes('ctx.request.body') || usage.source.includes('request.payload')) {
           confidence = 'high';
         }
-        // req.params without validation is also high risk (IDOR, injection)
-        else if (usage.source.includes('req.params') || usage.source.includes('@Param()')) {
+        // Params without validation is also high risk (IDOR, injection)
+        else if (usage.source.includes('req.params') || usage.source.includes('@Param()') ||
+                 usage.source.includes('ctx.params') || usage.source.includes('request.params')) {
           confidence = 'high';
         }
-        // req.query might be used for optional filters (lower confidence)
-        else if (usage.source.includes('req.query') || usage.source.includes('@Query()')) {
+        // Query might be used for optional filters (lower confidence)
+        else if (usage.source.includes('req.query') || usage.source.includes('@Query()') ||
+                 usage.source.includes('ctx.query') || usage.source.includes('request.query')) {
           confidence = 'medium';
         }
-        // req.headers validation is sometimes intentionally skipped
+        // Headers validation is sometimes intentionally skipped
         else if (usage.source.includes('req.headers')) {
           confidence = 'low';
         }
 
         // Collect specific field names accessed from this source
         const normalizedSource = usage.source.replace(' (destructured)', '');
-        const sourceKey = normalizedSource.startsWith('req.')
-          ? (normalizedSource.slice(4) as 'body' | 'params' | 'query' | 'headers')
-          : null;
-        const fields = sourceKey ? this.collectFieldNames(handler.node, sourceKey) : [];
+        let sourceKey: 'body' | 'params' | 'query' | 'headers' | null = null;
+        if (normalizedSource.startsWith('req.')) {
+          sourceKey = normalizedSource.slice(4) as 'body' | 'params' | 'query' | 'headers';
+        }
+        // Koa/Hapi sources map to the same field collection keys
+        else if (normalizedSource === 'ctx.request.body' || normalizedSource === 'request.payload') {
+          sourceKey = 'body';
+        } else if (normalizedSource === 'ctx.params' || normalizedSource === 'request.params') {
+          sourceKey = 'params';
+        } else if (normalizedSource === 'ctx.query' || normalizedSource === 'request.query') {
+          sourceKey = 'query';
+        }
+        let fields = sourceKey ? this.collectFieldNames(handler.node, sourceKey) : [];
+        // Remove fields that already have per-field type checks
+        if (validatedFields.size > 0) {
+          fields = fields.filter(f => !validatedFields.has(f));
+        }
+        // If all fields from this source are individually validated, skip the issue
+        if (fields.length === 0 && sourceKey && this.collectFieldNames(handler.node, sourceKey).length > 0) {
+          continue;
+        }
         const fieldSuffix = fields.length > 0 ? `.{ ${fields.join(', ')} }` : '';
 
         const suggestion = fields.length > 0
@@ -234,16 +389,110 @@ export class MissingInputValidationDetector extends BaseEngine {
   }
 
   /**
+   * Check if a route registration call has validation middleware in its arguments.
+   * Detects: express-validator chains, celebrate(), custom validateBody/validateRequest, etc.
+   */
+  private hasValidationMiddleware(routeCall: ts.CallExpression): boolean {
+    const args = routeCall.arguments;
+    if (args.length < 2) return false;
+
+    // Middleware args: everything between first (path) and last (handler)
+    const middlewareArgs = Array.from(args).slice(1, args.length - 1);
+
+    const allMiddlewareNodes: ts.Node[] = [];
+    for (const arg of middlewareArgs) {
+      allMiddlewareNodes.push(arg);
+      if (ts.isArrayLiteralExpression(arg)) {
+        for (const element of arg.elements) {
+          allMiddlewareNodes.push(element);
+        }
+      }
+    }
+
+    for (const middlewareNode of allMiddlewareNodes) {
+      if (this.isValidationMiddlewareNode(middlewareNode)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /** Check if a single AST node represents a validation middleware. */
+  private isValidationMiddlewareNode(node: ts.Node): boolean {
+    if (ts.isCallExpression(node)) {
+      return this.isValidationCallExpression(node);
+    }
+    if (ts.isIdentifier(node)) {
+      return this.isValidationIdentifier(node.text);
+    }
+    return false;
+  }
+
+  /** Check if a call expression represents a validation middleware call. */
+  private isValidationCallExpression(callExpr: ts.CallExpression): boolean {
+    const callee = callExpr.expression;
+
+    // Simple function call: celebrate({...}), validateBody(schema), body('email')
+    if (ts.isIdentifier(callee)) {
+      const name = callee.text;
+      const expressValidatorFns = ['body', 'param', 'query', 'check', 'validationResult', 'checkSchema', 'oneOf'];
+      if (expressValidatorFns.includes(name)) return true;
+      if (name === 'celebrate') return true;
+      if (this.isValidationIdentifier(name)) return true;
+    }
+
+    // Method chain: body('email').isEmail(), check('name').notEmpty().trim()
+    if (ts.isPropertyAccessExpression(callee)) {
+      const rootId = this.getRootCallOfChain(callExpr);
+      if (rootId) {
+        const rootName = rootId.text;
+        const expressValidatorFns = ['body', 'param', 'query', 'check', 'validationResult', 'checkSchema', 'oneOf'];
+        if (expressValidatorFns.includes(rootName)) return true;
+        if (this.isValidationIdentifier(rootName)) return true;
+      }
+    }
+
+    return false;
+  }
+
+  /** Walk a method chain to find the root callee identifier. */
+  private getRootCallOfChain(node: ts.CallExpression): ts.Identifier | null {
+    let current: ts.Expression = node.expression;
+    let depth = 0;
+    while (depth < 20) {
+      depth++;
+      if (ts.isIdentifier(current)) return current;
+      if (ts.isPropertyAccessExpression(current)) { current = current.expression; continue; }
+      if (ts.isCallExpression(current)) { current = current.expression; continue; }
+      break;
+    }
+    return null;
+  }
+
+  /** Check if a function name looks like a validation middleware. */
+  private isValidationIdentifier(name: string): boolean {
+    const lower = name.toLowerCase();
+    const knownNames = ['validatebody', 'validaterequest', 'validateparams', 'validatequery'];
+    if (knownNames.includes(lower)) return true;
+    // Match 'validate', 'validator', 'validation' but NOT 'invalidate', 'invalid'
+    if ((lower.includes('validat') || lower.includes('validator')) && !lower.includes('invalid')) return true;
+    if (lower.includes('sanitiz')) return true;
+    return false;
+  }
+
+  /**
    * Find all request data usage in handler
    */
   private findRequestDataUsage(node: ts.Node): RequestDataUsage[] {
     const usages: RequestDataUsage[] = [];
 
     traverse(node, (n) => {
-      // req.body
+      // req.body / ctx.request.body / request.payload
       if (ts.isPropertyAccessExpression(n)) {
         const text = n.getText();
 
+        // Express/Fastify body
         if (text.match(/req(uest)?\.body/)) {
           usages.push({
             node: n,
@@ -268,10 +517,62 @@ export class MissingInputValidationDetector extends BaseEngine {
             source: 'req.headers',
             risk: 'vulnerable to header injection',
           });
+        } else if (text.match(/req(uest)?\.files?(?!\w)/)) {
+          usages.push({
+            node: n,
+            source: 'req.files',
+            risk: 'vulnerable to unrestricted file upload',
+          });
+        }
+        // Koa context patterns
+        else if (text.match(/ctx\.request\.body/)) {
+          usages.push({
+            node: n,
+            source: 'ctx.request.body',
+            risk: 'vulnerable to injection attacks and privilege escalation',
+          });
+        } else if (text.match(/ctx\.params/)) {
+          usages.push({
+            node: n,
+            source: 'ctx.params',
+            risk: 'vulnerable to injection attacks and IDOR',
+          });
+        } else if (text.match(/ctx\.query/)) {
+          usages.push({
+            node: n,
+            source: 'ctx.query',
+            risk: 'vulnerable to injection attacks',
+          });
+        } else if (text.match(/ctx\.request\.files?(?!\w)/)) {
+          usages.push({
+            node: n,
+            source: 'ctx.request.files',
+            risk: 'vulnerable to unrestricted file upload',
+          });
+        }
+        // Hapi request patterns
+        else if (text.match(/^request\.payload/)) {
+          usages.push({
+            node: n,
+            source: 'request.payload',
+            risk: 'vulnerable to injection attacks and privilege escalation',
+          });
+        } else if (text.match(/^request\.params/)) {
+          usages.push({
+            node: n,
+            source: 'request.params',
+            risk: 'vulnerable to injection attacks and IDOR',
+          });
+        } else if (text.match(/^request\.query/)) {
+          usages.push({
+            node: n,
+            source: 'request.query',
+            risk: 'vulnerable to injection attacks',
+          });
         }
       }
 
-      // Destructuring: const { email } = req.body
+      // Destructuring: const { email } = req.body / ctx.request.body / request.payload
       if (ts.isVariableDeclaration(n) && n.initializer) {
         const initText = n.initializer.getText();
 
@@ -291,6 +592,46 @@ export class MissingInputValidationDetector extends BaseEngine {
           usages.push({
             node: n,
             source: 'req.query (destructured)',
+            risk: 'vulnerable to injection attacks',
+          });
+        }
+        // Koa destructuring
+        else if (initText.match(/ctx\.request\.body/)) {
+          usages.push({
+            node: n,
+            source: 'ctx.request.body (destructured)',
+            risk: 'vulnerable to injection attacks and privilege escalation',
+          });
+        } else if (initText.match(/ctx\.params/)) {
+          usages.push({
+            node: n,
+            source: 'ctx.params (destructured)',
+            risk: 'vulnerable to injection attacks and IDOR',
+          });
+        } else if (initText.match(/ctx\.query/)) {
+          usages.push({
+            node: n,
+            source: 'ctx.query (destructured)',
+            risk: 'vulnerable to injection attacks',
+          });
+        }
+        // Hapi destructuring
+        else if (initText.match(/request\.payload/)) {
+          usages.push({
+            node: n,
+            source: 'request.payload (destructured)',
+            risk: 'vulnerable to injection attacks and privilege escalation',
+          });
+        } else if (initText.match(/request\.params/)) {
+          usages.push({
+            node: n,
+            source: 'request.params (destructured)',
+            risk: 'vulnerable to injection attacks and IDOR',
+          });
+        } else if (initText.match(/request\.query/)) {
+          usages.push({
+            node: n,
+            source: 'request.query (destructured)',
             risk: 'vulnerable to injection attacks',
           });
         }
@@ -325,6 +666,70 @@ export class MissingInputValidationDetector extends BaseEngine {
               }
             }
           }
+        }
+      }
+
+      // Spread operator: db.create({...req.body}), { ...req.params }
+      if (ts.isSpreadAssignment(n) || ts.isSpreadElement(n)) {
+        const spreadText = n.expression.getText();
+        if (spreadText.match(/req(uest)?\.body/)) {
+          usages.push({
+            node: n,
+            source: 'req.body (spread)',
+            risk: 'mass assignment — all fields passed to DB/logic without filtering',
+          });
+        } else if (spreadText.match(/req(uest)?\.params/)) {
+          usages.push({
+            node: n,
+            source: 'req.params (spread)',
+            risk: 'mass assignment — all request params spread without filtering',
+          });
+        } else if (spreadText.match(/req(uest)?\.query/)) {
+          usages.push({
+            node: n,
+            source: 'req.query (spread)',
+            risk: 'mass assignment — all query params spread without filtering',
+          });
+        }
+        // Koa spread
+        else if (spreadText.match(/ctx\.request\.body/)) {
+          usages.push({
+            node: n,
+            source: 'ctx.request.body (spread)',
+            risk: 'mass assignment — all fields passed to DB/logic without filtering',
+          });
+        } else if (spreadText.match(/ctx\.params/)) {
+          usages.push({
+            node: n,
+            source: 'ctx.params (spread)',
+            risk: 'mass assignment — all request params spread without filtering',
+          });
+        } else if (spreadText.match(/ctx\.query/)) {
+          usages.push({
+            node: n,
+            source: 'ctx.query (spread)',
+            risk: 'mass assignment — all query params spread without filtering',
+          });
+        }
+        // Hapi spread
+        else if (spreadText.match(/request\.payload/)) {
+          usages.push({
+            node: n,
+            source: 'request.payload (spread)',
+            risk: 'mass assignment — all fields passed to DB/logic without filtering',
+          });
+        } else if (spreadText.match(/request\.params/)) {
+          usages.push({
+            node: n,
+            source: 'request.params (spread)',
+            risk: 'mass assignment — all request params spread without filtering',
+          });
+        } else if (spreadText.match(/request\.query/)) {
+          usages.push({
+            node: n,
+            source: 'request.query (spread)',
+            risk: 'mass assignment — all query params spread without filtering',
+          });
         }
       }
     });
@@ -377,16 +782,6 @@ export class MissingInputValidationDetector extends BaseEngine {
         }
       }
 
-      // Check for TypeScript type guards with validation
-      if (ts.isIfStatement(n)) {
-        const condition = n.expression.getText();
-
-        // Type narrowing patterns that include validation
-        if (condition.match(/typeof.*===|instanceof|Array\.isArray|is[A-Z]/)) {
-          hasValidation = true;
-        }
-      }
-
       // Check for validation decorators (NestJS with class-validator)
       if (ts.isParameter(n)) {
         const typeNode = n.type;
@@ -410,6 +805,42 @@ export class MissingInputValidationDetector extends BaseEngine {
   }
 
   /**
+   * Collect field names that have per-field type checks (typeof, instanceof, Array.isArray).
+   * Returns a set of field names that are individually validated.
+   */
+  private getFieldsWithTypeChecks(handlerNode: ts.Node): Set<string> {
+    const validatedFields = new Set<string>();
+
+    traverse(handlerNode, (n) => {
+      if (ts.isIfStatement(n)) {
+        const condText = n.expression.getText();
+
+        // Match: typeof req.body.fieldName === 'string'
+        // Match: typeof fieldName === 'string' (where fieldName is destructured from req.body)
+        // Also matches Koa (ctx.request.body, ctx.params, ctx.query) and Hapi (request.payload, request.params, request.query)
+        const typeofMatch = condText.match(/typeof\s+(?:req(?:uest)?\.(?:body|params|query)\.|ctx\.(?:request\.body|params|query)\.|request\.(?:payload|params|query)\.)?(\w+)\s*===\s*/);
+        if (typeofMatch) {
+          validatedFields.add(typeofMatch[1]);
+        }
+
+        // Match: Array.isArray(req.body.fieldName) or Array.isArray(fieldName)
+        const arrayMatch = condText.match(/Array\.isArray\((?:req(?:uest)?\.(?:body|params|query)\.|ctx\.(?:request\.body|params|query)\.|request\.(?:payload|params|query)\.)?(\w+)\)/);
+        if (arrayMatch) {
+          validatedFields.add(arrayMatch[1]);
+        }
+
+        // Match: req.body.fieldName instanceof Something
+        const instanceofMatch = condText.match(/(?:req(?:uest)?\.(?:body|params|query)\.|ctx\.(?:request\.body|params|query)\.|request\.(?:payload|params|query)\.)?(\w+)\s+instanceof\s+/);
+        if (instanceofMatch) {
+          validatedFields.add(instanceofMatch[1]);
+        }
+      }
+    });
+
+    return validatedFields;
+  }
+
+  /**
    * Collect the specific field names accessed from a request source within a handler.
    * e.g. req.body.amount, req.body.currency → ['amount', 'currency']
    *      const { amount, currency } = req.body → ['amount', 'currency']
@@ -424,6 +855,8 @@ export class MissingInputValidationDetector extends BaseEngine {
       // req.body.fieldName — the outer PropertyAccess whose object is req.body
       if (ts.isPropertyAccessExpression(n) && ts.isPropertyAccessExpression(n.expression)) {
         const inner = n.expression;
+
+        // Express: req.body.fieldName, req.params.fieldName
         if (
           inner.name.text === sourceKey &&
           ts.isIdentifier(inner.expression) &&
@@ -431,18 +864,91 @@ export class MissingInputValidationDetector extends BaseEngine {
         ) {
           fields.add(n.name.text);
         }
+
+        // Koa: ctx.params.fieldName, ctx.query.fieldName
+        if (
+          (sourceKey === 'params' || sourceKey === 'query') &&
+          inner.name.text === sourceKey &&
+          ts.isIdentifier(inner.expression) &&
+          inner.expression.text === 'ctx'
+        ) {
+          fields.add(n.name.text);
+        }
+
+        // Hapi: request.params.fieldName, request.query.fieldName
+        if (
+          (sourceKey === 'params' || sourceKey === 'query') &&
+          inner.name.text === sourceKey &&
+          ts.isIdentifier(inner.expression) &&
+          inner.expression.text === 'request'
+        ) {
+          fields.add(n.name.text);
+        }
+
+        // Hapi: request.payload.fieldName (maps to sourceKey 'body')
+        if (
+          sourceKey === 'body' &&
+          inner.name.text === 'payload' &&
+          ts.isIdentifier(inner.expression) &&
+          inner.expression.text === 'request'
+        ) {
+          fields.add(n.name.text);
+        }
       }
 
-      // const { field1, field2 } = req.body
+      // Koa: ctx.request.body.fieldName — 3-level deep PropertyAccess
+      if (
+        sourceKey === 'body' &&
+        ts.isPropertyAccessExpression(n) &&
+        ts.isPropertyAccessExpression(n.expression)
+      ) {
+        const mid = n.expression; // ctx.request.body
+        if (
+          mid.name.text === 'body' &&
+          ts.isPropertyAccessExpression(mid.expression) &&
+          mid.expression.name.text === 'request' &&
+          ts.isIdentifier(mid.expression.expression) &&
+          mid.expression.expression.text === 'ctx'
+        ) {
+          fields.add(n.name.text);
+        }
+      }
+
+      // const { field1, field2 } = req.body / ctx.request.body / request.payload
       if (
         ts.isVariableDeclaration(n) &&
         n.initializer &&
-        ts.isObjectBindingPattern(n.name) &&
-        n.initializer.getText().match(new RegExp(`req(uest)?\\.${sourceKey}`))
+        ts.isObjectBindingPattern(n.name)
       ) {
-        for (const element of n.name.elements) {
-          if (ts.isIdentifier(element.name)) {
-            fields.add(element.name.text);
+        const initText = n.initializer.getText();
+        let matches = false;
+
+        // Express: req.body, req.params, etc.
+        if (initText.match(new RegExp(`req(uest)?\\.${sourceKey}`))) {
+          matches = true;
+        }
+        // Koa: ctx.params, ctx.query
+        if ((sourceKey === 'params' || sourceKey === 'query') && initText.match(new RegExp(`ctx\\.${sourceKey}`))) {
+          matches = true;
+        }
+        // Koa: ctx.request.body
+        if (sourceKey === 'body' && initText.match(/ctx\.request\.body/)) {
+          matches = true;
+        }
+        // Hapi: request.params, request.query
+        if ((sourceKey === 'params' || sourceKey === 'query') && initText.match(new RegExp(`request\\.${sourceKey}`))) {
+          matches = true;
+        }
+        // Hapi: request.payload
+        if (sourceKey === 'body' && initText.match(/request\.payload/)) {
+          matches = true;
+        }
+
+        if (matches) {
+          for (const element of n.name.elements) {
+            if (ts.isIdentifier(element.name)) {
+              fields.add(element.name.text);
+            }
           }
         }
       }
@@ -465,6 +971,55 @@ export class MissingInputValidationDetector extends BaseEngine {
   }
 
   /**
+   * Check if file-level global validation middleware is applied.
+   * Detects patterns like:
+   *   app.use(validate())
+   *   app.use(joi.validate())
+   *   app.use(celebrate())
+   *   app.use(expressValidator())
+   * When detected, routes in the same file likely have validation applied globally.
+   */
+  private hasGlobalValidationMiddleware(sourceFile: ts.SourceFile): boolean {
+    let hasGlobal = false;
+
+    traverse(sourceFile, (node) => {
+      if (hasGlobal) return;
+
+      // Look for app.use() or router.use() calls
+      if (!ts.isCallExpression(node)) return;
+      const { expression } = node;
+      if (!ts.isPropertyAccessExpression(expression)) return;
+      if (expression.name.text !== 'use') return;
+
+      const objName = this.getObjectName(expression.expression);
+      if (!objName || !/^(app|router|server|api|fastify)$/i.test(objName)) return;
+
+      // Check if any argument is a validation middleware call or identifier
+      for (const arg of node.arguments) {
+        if (this.isValidationMiddlewareNode(arg)) {
+          hasGlobal = true;
+          return;
+        }
+
+        // Also check for known global validation patterns by text
+        const argText = arg.getText().toLowerCase();
+        const globalValidationPatterns = [
+          'celebrate',
+          'joi.validate',
+          'express-validator',
+          'expressvalidator',
+        ];
+        if (globalValidationPatterns.some(p => argText.includes(p))) {
+          hasGlobal = true;
+          return;
+        }
+      }
+    });
+
+    return hasGlobal;
+  }
+
+  /**
    * Check if function is async
    */
   private isAsyncFunction(node: ts.Node): boolean {
@@ -478,9 +1033,11 @@ export class MissingInputValidationDetector extends BaseEngine {
 
 interface RouteHandler {
   node: ts.Node;
-  framework: 'express' | 'nestjs';
+  framework: 'express' | 'nestjs' | 'koa' | 'hapi';
   method: string;
   isAsync: boolean;
+  /** The full route registration call expression (e.g. app.post('/path', ...middleware, handler)) */
+  routeCallExpression?: ts.CallExpression;
 }
 
 interface RequestDataUsage {

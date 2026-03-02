@@ -1,13 +1,13 @@
 # CodeDrift
 
-The integrity layer for AI-generated code. Catches the bugs that Copilot, Cursor, and ChatGPT silently ship to production.
-
 [![npm version](https://badge.fury.io/js/codedrift.svg)](https://www.npmjs.com/package/codedrift)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-AI coding assistants are writing more production code every month. They're fast, fluent, and confidently wrong. They generate async functions that never complete, import packages that don't exist, leak secrets in error responses, and pass code review because it looks correct.
+The integrity layer for AI-generated code. Catches the bugs that Copilot, Cursor and ChatGPT silently ship to production.
 
-CodeDrift is the safety layer between AI-generated code and production. It detects the class of bugs that are syntactically valid but semantically dangerous — the ones that ESLint, TypeScript, and human reviewers miss because the code reads fine.
+AI coding assistants are writing more production code every month. They're fast, fluent and confidently wrong. They generate async functions that never complete, import packages that don't exist, leak secrets in error responses and pass code review because it looks correct.
+
+CodeDrift is the safety layer between AI-generated code and production. It detects the class of bugs that are syntactically valid but semantically dangerous, the ones that ESLint, TypeScript and human reviewers miss because the code reads fine.
 
 ## What's Actually Happening
 
@@ -15,7 +15,7 @@ CodeDrift is the safety layer between AI-generated code and production. It detec
 
 Every team using AI coding tools is accumulating structural debt they can't see. Missing awaits silently corrupt data. Hallucinated dependencies pass CI and crash in production. Stack traces with API keys leak through error handlers that look perfectly reasonable.
 
-This isn't a tooling gap. It's a trust gap. Teams are shipping AI-written code faster than they can verify it. CodeDrift closes that gap — not by slowing down AI adoption, but by making it safe.
+This isn't a tooling gap. It's a trust gap. Teams are shipping AI-written code faster than they can verify it. CodeDrift closes that gap not by slowing down AI adoption but by making it safe.
 
 ## Quick Start
 
@@ -74,8 +74,8 @@ CRITICAL Issues (1)
 
 | Engine | Detects | Severity |
 |--------|---------|----------|
-| IDOR | Database queries without authorization checks | Critical |
-| Missing Input Validation | req.body or req.params used without validation | Critical |
+| IDOR | Database queries without authorization checks (Express, Koa, Hapi) | Critical |
+| Missing Input Validation | Request data used without validation (Express, Koa, Hapi, NestJS) | Critical |
 | Hardcoded Secrets | API keys and tokens in source code | Critical |
 | Stack Trace Exposure | Error stacks leaked in API responses | Critical |
 | Missing Await | Async functions called without await | Critical |
@@ -381,7 +381,7 @@ jobs:
 npx codedrift
 ```
 
-Smart summary — severity breakdown, top 5 issues, and timing:
+Smart summary: severity breakdown, top 5 issues, and timing:
 
 ```
 📊 Analysis Complete
@@ -417,7 +417,7 @@ Machine-readable format for CI/CD pipelines and custom tooling.
 
 ### HTML
 
-Automatically generated on every local run — no flags needed:
+Automatically generated on every local run no flags needed:
 
 ```bash
 npx codedrift
@@ -528,10 +528,11 @@ Architecture:
 - **CLI**: Orchestrates analysis, handles exit codes, and integrates with CI/CD pipelines
 
 Engine highlights:
-- **Stack trace**: Distinguishes `res.json({ error: err.stack })` (report) from `logger.error({ stack: err.stack })` (skip) — works with any Express response parameter name, not just `res`
+- **IDOR / Input Validation**: Multi-framework — detects Express (`req.params`), Koa (`ctx.params`), Hapi (`request.payload`), and NestJS patterns. Recognises global validation middleware (`app.use(validate())`)
+- **Stack trace**: Distinguishes `res.json({ error: err.stack })` (report) from `logger.error({ stack: err.stack })` (skip) — skips development guards (`if (NODE_ENV !== 'production')`) and detects GraphQL `formatError` stack leaks
 - **async-forEach**: Recognises `await Promise.allSettled/any/race(array.map(...))` and chained `.then()` as safe patterns
-- **missing-await**: Scope-aware — only flags calls inside async functions where `await` is actually valid
-- **Secrets**: Entropy-filtered, path-aware — ignores migration filenames, file path arguments, and test fixtures
+- **missing-await**: Scope-aware with cross-file heuristics — detects likely-async imports by naming convention, module origin, and `.then()`/`await` usage elsewhere in the file
+- **Secrets**: Entropy-filtered, path-aware — detects secrets in template literals, ignores migration filenames, file path arguments, and test fixtures
 
 Performance: 100+ files per second on typical projects
 Privacy: 100% local analysis, no telemetry, code never leaves your machine
