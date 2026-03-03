@@ -47,7 +47,148 @@ export class IDORDetector extends BaseEngine {
     /account_id/,
     /createdBy/,
     /created_by/,
+    /customerId/,
+    /customer_id/,
+    /merchantId/,
+    /merchant_id/,
+    /vendorId/,
+    /vendor_id/,
+    /memberId/,
+    /member_id/,
+    /clientId/,
+    /client_id/,
+    /groupId/,
+    /group_id/,
+    /sellerId/,
+    /seller_id/,
+    /buyerId/,
+    /buyer_id/,
+    /patientId/,
+    /patient_id/,
+    /employeeId/,
+    /employee_id/,
+    /managerId/,
+    /manager_id/,
+    /workspaceId/,
+    /workspace_id/,
+    /projectId/,
+    /project_id/,
   ];
+
+  /** Ownership column names in WHERE clauses — if key matches, query is ownership-scoped */
+  private static readonly OWNERSHIP_COLUMNS = new Set<string>([
+    'userId', 'user_id', 'UserId',
+    'ownerId', 'owner_id', 'OwnerId',
+    'createdBy', 'created_by', 'CreatedBy',
+    'authorId', 'author_id', 'AuthorId',
+    'supplierId', 'supplier_id', 'SupplierId',
+    'organizationId', 'organization_id', 'OrganizationId',
+    'orgId', 'org_id', 'OrgId',
+    'tenantId', 'tenant_id', 'TenantId',
+    'companyId', 'company_id', 'CompanyId',
+    'teamId', 'team_id', 'TeamId',
+    'accountId', 'account_id', 'AccountId',
+    'customerId', 'customer_id', 'CustomerId',
+    'assignedTo', 'assigned_to', 'AssignedTo',
+    'belongsTo', 'belongs_to',
+    'merchantId', 'merchant_id', 'MerchantId',
+    'vendorId', 'vendor_id', 'VendorId',
+    'shopId', 'shop_id', 'ShopId',
+    'storeId', 'store_id', 'StoreId',
+    'workspaceId', 'workspace_id', 'WorkspaceId',
+    'projectId', 'project_id', 'ProjectId',
+    'memberId', 'member_id', 'MemberId',
+    'clientId', 'client_id', 'ClientId',
+    'groupId', 'group_id', 'GroupId',
+    'sellerId', 'seller_id', 'SellerId',
+    'buyerId', 'buyer_id', 'BuyerId',
+    'patientId', 'patient_id', 'PatientId',
+    'employeeId', 'employee_id', 'EmployeeId',
+    'departmentId', 'department_id', 'DepartmentId',
+    'providerId', 'provider_id', 'ProviderId',
+    'managerId', 'manager_id', 'ManagerId',
+    'agentId', 'agent_id', 'AgentId',
+    'partnerId', 'partner_id', 'PartnerId',
+    'practitionerId', 'practitioner_id', 'PractitionerId',
+    'senderId', 'sender_id', 'SenderId',
+    'recipientId', 'recipient_id', 'RecipientId',
+    'requesterId', 'requester_id', 'RequesterId',
+    'reviewerId', 'reviewer_id', 'ReviewerId',
+    'parentId', 'parent_id', 'ParentId',
+  ]);
+
+  /** Regex derived from OWNERSHIP_COLUMNS for text-based fallback matching */
+  private static readonly OWNERSHIP_COLUMNS_REGEX = new RegExp(
+    '\\b(' + [...IDORDetector.OWNERSHIP_COLUMNS].join('|') + ')\\b'
+  );
+
+  /** Auth identity patterns — expressions referencing the authenticated user */
+  private static readonly AUTH_IDENTITY_PATTERNS: RegExp[] = [
+    // req.user.* (most common)
+    /req(uest)?\.user\.\w+/,
+    /req(uest)?\.session\.user/,
+    /req(uest)?\.session\.passport\.user/,
+    /req(uest)?\.session\.userId/,
+    // Direct on req (JWT middleware often sets these)
+    /req(uest)?\.userId/,
+    /req(uest)?\.supplierId/,
+    /req(uest)?\.orgId/,
+    /req(uest)?\.tenantId/,
+    /req(uest)?\.companyId/,
+    /req(uest)?\.teamId/,
+    /req(uest)?\.accountId/,
+    /req(uest)?\.customerId/,
+    // Auth0 / express-jwt
+    /req(uest)?\.auth\.sub/,
+    /req(uest)?\.auth\.userId/,
+    /req(uest)?\.auth\.org_id/,
+    // JWT token / decoded
+    /req(uest)?\.token\.sub/,
+    /req(uest)?\.token\.userId/,
+    /req(uest)?\.decoded\.id/,
+    /req(uest)?\.decoded\.userId/,
+    // Custom namespace
+    /req(uest)?\.currentUser\.\w+/,
+    /req(uest)?\.principal\.\w+/,
+    /req(uest)?\.identity\.\w+/,
+    /req(uest)?\.context\.userId/,
+    // Koa
+    /ctx\.state\.user/,
+    /ctx\.user\.\w+/,
+    /ctx\.auth\.\w+/,
+    // Hapi
+    /request\.auth\.credentials/,
+    // Express res.locals (set by prior middleware)
+    /res\.locals\.user/,
+    /res\.locals\.userId/,
+    // JWT claims (express-jwt v7+, custom middleware)
+    /req(uest)?\.claims\.\w+/,
+    // GraphQL context
+    /context\.user\.\w+/,
+  ];
+
+  /** Admin/role middleware — skip IDOR entirely for these routes */
+  private static readonly ADMIN_MIDDLEWARE = new Set<string>([
+    'isadmin', 'requireadmin', 'adminonly',
+    'requirerole', 'checkrole', 'authorize',
+    'rbac', 'hasrole', 'ensureadmin',
+    'issupplieradmin', 'issuperadmin', 'issystemadmin',
+    'superadminonly', 'requiresuperadmin', 'guard',
+    'checkpermission', 'requirepermission', 'haspermission',
+    'requirepermissions', 'checkpermissions',
+    'acl', 'requirescope', 'checkscope',
+    'verifyrole', 'ensurerole',
+    'rolemiddleware', 'permissionmiddleware',
+    'ismanager', 'ismoderator', 'isstaff',
+  ]);
+
+  /** Ownership middleware — the middleware itself IS the ownership check */
+  private static readonly OWNERSHIP_MIDDLEWARE = new Set<string>([
+    'isowner', 'isresourceowner', 'checkownership',
+    'verifyownership', 'belongstouser', 'ensureowner',
+    'validateownership', 'requireownership', 'owneronly',
+    'checkresourceowner', 'ownermiddleware',
+  ]);
 
   async analyze(context: AnalysisContext): Promise<Issue[]> {
     const issues: Issue[] = [];
@@ -101,15 +242,19 @@ export class IDORDetector extends BaseEngine {
     const databaseOperations = [
       // Read operations
       'findById', 'findByPk', 'findOne', 'findUnique', 'findFirst',
+      'findOneOrFail', 'findUniqueOrThrow', 'findFirstOrThrow',
+      'findOneBy', 'findOneByOrFail',
       'getById', 'fetch', 'fetchById', 'retrieve', 'load',
-      'select', 'query', 'where',
+      'select', 'query', 'where', 'first', 'findMany',
+      // DynamoDB
+      'getItem', 'putItem', 'deleteItem', 'updateItem',
       // Delete operations
-      'destroy', 'destroyAll',
+      'destroy', 'destroyAll', 'delete', 'del',
       'deleteOne', 'deleteMany', 'deleteById', 'remove', 'removeById',
       'findByIdAndDelete', 'findByIdAndRemove',
       'findOneAndDelete', 'findOneAndRemove',
       // Update operations
-      'update', 'updateOne', 'updateMany', 'updateById',
+      'update', 'updateOne', 'updateMany', 'updateById', 'upsert',
       'findByIdAndUpdate',
       'findOneAndUpdate', 'findOneAndRemove',
     ];
@@ -123,8 +268,9 @@ export class IDORDetector extends BaseEngine {
       return null;
     }
 
-    // For generic 'query'/'select' methods, only flag if we can confirm raw SQL with user input
-    if ((methodName === 'query' || methodName === 'select' || methodName === 'where') && !this.isRawSqlWithUserInput(node)) {
+    // For generic 'query'/'select'/'first'/'findMany' methods, only flag if we can confirm raw SQL with user input
+    const genericMethods = ['query', 'select', 'where', 'first', 'findMany'];
+    if (genericMethods.includes(methodName) && !this.isRawSqlWithUserInput(node)) {
       return null;
     }
 
@@ -134,8 +280,14 @@ export class IDORDetector extends BaseEngine {
       return null;
     }
 
-    // Check if route has admin middleware — skip flagging for admin-protected routes
-    if (this.hasAdminMiddleware(node)) {
+    // Check if route has admin or ownership middleware — skip IDOR for these
+    const middlewareResult = this.checkRouteMiddleware(node);
+    if (middlewareResult === 'admin' || middlewareResult === 'ownership') {
+      return null;
+    }
+
+    // Check if router/app-level middleware handles auth/ownership for all routes
+    if (this.hasRouterLevelAuthMiddleware(node)) {
       return null;
     }
 
@@ -144,9 +296,18 @@ export class IDORDetector extends BaseEngine {
       return null;
     }
 
-    // Check if there's an authorization check nearby
-    const hasAuthCheck = this.hasAuthorizationCheck(node);
-    if (hasAuthCheck) {
+    // Check if the WHERE clause itself contains ownership columns (AST-level)
+    if (this.hasWhereClauseOwnership(node)) {
+      return null;
+    }
+
+    // Check if there's an authorization check nearby (text-based scan of function body)
+    if (this.hasAuthorizationCheck(node)) {
+      return null;
+    }
+
+    // Check for post-query ownership pattern: fetch then compare with auth identity
+    if (this.hasPostQueryOwnershipCheck(node)) {
       return null;
     }
 
@@ -173,11 +334,12 @@ export class IDORDetector extends BaseEngine {
 
     // Determine appropriate suggestion based on operation type
     const mutationMethods = [
-      'destroy', 'destroyAll',
+      'destroy', 'destroyAll', 'delete', 'del',
       'deleteOne', 'deleteMany', 'deleteById', 'remove', 'removeById',
       'findByIdAndDelete', 'findByIdAndRemove',
       'findOneAndDelete', 'findOneAndRemove',
-      'update', 'updateOne', 'updateMany', 'updateById',
+      'deleteItem', 'putItem', 'updateItem',
+      'update', 'updateOne', 'updateMany', 'updateById', 'upsert',
       'findByIdAndUpdate', 'findOneAndUpdate',
     ];
 
@@ -206,12 +368,14 @@ export class IDORDetector extends BaseEngine {
     // Common ORM/database method names that are unambiguous
     const ormMethods = [
       'findById', 'findByPk', 'findOne', 'findUnique', 'findFirst',
-      'get', 'getById',
+      'findOneOrFail', 'findUniqueOrThrow', 'findFirstOrThrow',
+      'findOneBy', 'findOneByOrFail',
+      'get', 'getById', 'getItem', 'putItem', 'deleteItem', 'updateItem',
       'destroy', 'destroyAll',
       'deleteOne', 'deleteMany', 'deleteById', 'removeById',
       'findByIdAndDelete', 'findByIdAndUpdate', 'findByIdAndRemove',
       'findOneAndDelete', 'findOneAndUpdate', 'findOneAndRemove',
-      'updateOne', 'updateMany', 'updateById',
+      'updateOne', 'updateMany', 'updateById', 'upsert',
     ];
 
     if (ormMethods.includes(methodName)) {
@@ -232,6 +396,17 @@ export class IDORDetector extends BaseEngine {
         /mongoose/i,
         /typeorm/i,
         /knex/i,
+        /firebase/i,
+        /firestore/i,
+        /supabase/i,
+        /dynamodb/i,
+        /dynamo/i,
+        /^mongo$/i,
+        /^Store$/,
+        /drizzle/i,
+        /objection/i,
+        /bookshelf/i,
+        /mikro/i,
       ];
 
       return dbObjectPatterns.some(pattern => pattern.test(objectName));
@@ -256,8 +431,7 @@ export class IDORDetector extends BaseEngine {
     if (!sqlKeywords.test(firstArgText)) return false;
 
     // Check if SQL already has an ownership clause — if so, developer is handling authorization
-    const ownershipPatterns = /\b(user_id|owner_id|tenant_id|org_id|organization_id|created_by|account_id|company_id|team_id)\b/i;
-    if (ownershipPatterns.test(firstArgText)) return false;
+    if (IDORDetector.OWNERSHIP_COLUMNS_REGEX.test(firstArgText)) return false;
 
     // Check parameterized args (2nd, 3rd arg etc.) for user input
     for (let i = 1; i < node.arguments.length; i++) {
@@ -330,9 +504,13 @@ export class IDORDetector extends BaseEngine {
       if (ts.isIdentifier(arg)) {
         const varName = arg.text.toLowerCase();
         if (['id', 'userid', 'documentid', 'resourceid', 'itemid'].includes(varName)) {
-          // Trace back to see if it comes from req.params
-          const comesFromRequest = this.tracesBackToRequest(arg, node);
-          if (comesFromRequest) {
+          // Trace back to see if it comes from req.params or auth identity
+          const traceResult = this.tracesBackToRequest(arg, node);
+          if (traceResult.comesFromRequest) {
+            if (traceResult.isAuthIdentity) {
+              // Variable is auth identity (req.userId, req.auth.sub, etc.) — NOT user input
+              return { isUserInput: false, isDirect: false, isTraced: false };
+            }
             return { isUserInput: true, isDirect: false, isTraced: true };
           }
           // Only flag untraced 'id' variables if we're inside a route handler context
@@ -348,40 +526,62 @@ export class IDORDetector extends BaseEngine {
   }
 
   /**
-   * Trace variable back to see if it comes from request
+   * Trace variable back to see if it comes from request user input or auth identity.
+   * Returns { comesFromRequest: true, isAuthIdentity: false } for user input (req.params, req.body, req.query)
+   * Returns { comesFromRequest: true, isAuthIdentity: true } for auth identity (req.userId, req.auth.sub, etc.)
    */
-  private tracesBackToRequest(identifier: ts.Identifier, searchScope: ts.Node): boolean {
+  private tracesBackToRequest(identifier: ts.Identifier, searchScope: ts.Node): { comesFromRequest: boolean; isAuthIdentity: boolean } {
     const varName = identifier.text;
     let comesFromRequest = false;
+    let isAuthIdentity = false;
 
     // Search backwards in the same function
     let currentScope = searchScope.parent;
     while (currentScope && !ts.isSourceFile(currentScope)) {
       traverse(currentScope, (node) => {
-        // Look for variable declarations: const id = req.params.id
+        if (comesFromRequest) return; // Already found
+
+        // Look for variable declarations: const id = req.params.id / const userId = req.userId
         if (ts.isVariableDeclaration(node)) {
           if (ts.isIdentifier(node.name) && node.name.text === varName) {
             if (node.initializer) {
               const initText = node.initializer.getText();
+              // User input sources
               if (initText.match(/req(uest)?\.(params|query|body)/) ||
                   initText.match(/ctx\.(params|query|request\.body)/) ||
                   initText.match(/request\.(params|query|payload)/)) {
                 comesFromRequest = true;
               }
+              // Auth identity sources: const userId = req.userId, const sub = req.auth.sub, etc.
+              if (IDORDetector.AUTH_IDENTITY_PATTERNS.some(p => p.test(initText))) {
+                comesFromRequest = true;
+                isAuthIdentity = true;
+              }
             }
           }
         }
 
-        // Look for destructuring: const { id } = req.params
+        // Look for destructuring: const { id } = req.params / const { supplierId } = req
         if (ts.isVariableDeclaration(node) && ts.isObjectBindingPattern(node.name)) {
           for (const element of node.name.elements) {
             if (ts.isBindingElement(element) && ts.isIdentifier(element.name)) {
               if (element.name.text === varName && node.initializer) {
                 const initText = node.initializer.getText();
+                // User input destructuring: const { id } = req.params
                 if (initText.match(/req(uest)?\.(params|query|body)/) ||
                     initText.match(/ctx\.(params|query|request\.body)/) ||
                     initText.match(/request\.(params|query|payload)/)) {
                   comesFromRequest = true;
+                }
+                // Identity destructuring from req directly: const { supplierId } = req
+                if (/^req(uest)?$/.test(initText) && IDORDetector.OWNERSHIP_COLUMNS.has(varName)) {
+                  comesFromRequest = true;
+                  isAuthIdentity = true;
+                }
+                // Identity destructuring from auth namespace: const { userId } = req.auth
+                if (/req(uest)?\.(auth|user|token|decoded|session|currentUser|principal|identity|context)$/.test(initText)) {
+                  comesFromRequest = true;
+                  isAuthIdentity = true;
                 }
               }
             }
@@ -392,121 +592,129 @@ export class IDORDetector extends BaseEngine {
       currentScope = currentScope.parent;
     }
 
-    return comesFromRequest;
+    return { comesFromRequest, isAuthIdentity };
   }
 
   /**
-   * Check if there's an authorization check nearby
+   * Check if there's an authorization check in the enclosing function.
+   * Single traversal calling focused sub-methods for efficiency.
    */
   private hasAuthorizationCheck(queryNode: ts.Node): boolean {
-    // Check in the surrounding function
     let functionScope = queryNode.parent;
     while (functionScope && !this.isFunctionLike(functionScope)) {
       functionScope = functionScope.parent;
     }
-
-    if (!functionScope) {
-      return false;
-    }
+    if (!functionScope) return false;
 
     let hasCheck = false;
 
     traverse(functionScope, (node) => {
-      // Check for authorization patterns
-      if (ts.isIfStatement(node)) {
-        const conditionText = node.expression.getText();
-
-        if (IDORDetector.AUTH_PATTERNS.some(pattern => pattern.test(conditionText))) {
-          hasCheck = true;
-        }
-      }
-
-      if (ts.isConditionalExpression(node)) {
-        const conditionText = node.condition.getText();
-
-        if (IDORDetector.AUTH_PATTERNS.some(pattern => pattern.test(conditionText))) {
-          hasCheck = true;
-        }
-      }
-
-      // Check for WHERE clauses with ownership fields
-      if (ts.isCallExpression(node)) {
-        const text = node.getText();
-
-        if (text.match(/where.*(user_id|userId|owner_id|ownerId|supplier_id|supplierId|org_id|orgId|organization_id|organizationId|tenant_id|tenantId|company_id|companyId|team_id|teamId|account_id|accountId|created_by|createdBy)/i)) {
-          hasCheck = true;
-        }
-
-        if (text.match(/(user_id|userId|owner_id|ownerId|supplier_id|supplierId|org_id|orgId|organization_id|organizationId|tenant_id|tenantId|company_id|companyId|team_id|teamId|account_id|accountId|created_by|createdBy)\s*=/i)) {
-          hasCheck = true;
-        }
-
-        // Check for authorization function calls: canAccess(user, doc), authorize(req, resource), etc.
-        const callExpr = node.expression;
-        let callName: string | null = null;
-
-        if (ts.isIdentifier(callExpr)) {
-          callName = callExpr.text;
-        } else if (ts.isPropertyAccessExpression(callExpr)) {
-          callName = callExpr.name.text;
-        }
-
-        if (callName) {
-          const authFunctionPatterns = [
-            /^(can|check|verify|validate|assert|require)(Access|Permission|Auth|Owner|Ownership|Role|Roles)$/i,
-            /^(authorize|authorise|isAuthorized|isOwner|isAllowed|isPermitted)$/i,
-            /^(hasPermission|hasAccess|hasRole|hasOwnership|belongsToUser)$/i,
-            /^(enforceAccess|enforceOwnership|enforcePermission|enforceAuth)$/i,
-            /^guard$/i,
-          ];
-
-          if (authFunctionPatterns.some(pattern => pattern.test(callName!))) {
-            hasCheck = true;
-          }
-        }
-      }
-
-      // Check for middleware/guard decorators (NestJS)
-      if (ts.canHaveDecorators(node)) {
-        const decorators = ts.getDecorators(node);
-        if (decorators) {
-          for (const decorator of decorators) {
-            const decoratorText = decorator.getText();
-            if (decoratorText.match(/UseGuards|@Auth|@Roles|@RequireAuth/)) {
-              hasCheck = true;
-            }
-          }
-        }
-      }
+      if (hasCheck) return;
+      if (this.isAuthCondition(node)) { hasCheck = true; return; }
+      if (this.isAuthFunctionCall(node)) { hasCheck = true; return; }
+      if (this.isAuthDecorator(node)) { hasCheck = true; return; }
+      if (this.isOwnershipWhereText(node)) { hasCheck = true; return; }
     });
 
     return hasCheck;
   }
 
-  /**
-   * Check if the route registration has admin/role-checking middleware.
-   * Looks for middleware arguments in route handler calls (e.g., app.get('/path', isAdmin, handler))
-   * and skips IDOR flagging if admin middleware is detected.
-   */
-  private hasAdminMiddleware(queryNode: ts.Node): boolean {
-    // Walk up to find the enclosing route registration call
-    const routeCall = this.findEnclosingRouteCall(queryNode);
-    if (!routeCall) {
-      return false;
+  /** Check if/ternary conditions for auth patterns */
+  private isAuthCondition(node: ts.Node): boolean {
+    if (ts.isIfStatement(node)) {
+      const condText = node.expression.getText();
+      if (IDORDetector.AUTH_PATTERNS.some(p => p.test(condText))) return true;
+      if (IDORDetector.AUTH_IDENTITY_PATTERNS.some(p => p.test(condText))) return true;
+    }
+    if (ts.isConditionalExpression(node)) {
+      const condText = node.condition.getText();
+      if (IDORDetector.AUTH_PATTERNS.some(p => p.test(condText))) return true;
+      if (IDORDetector.AUTH_IDENTITY_PATTERNS.some(p => p.test(condText))) return true;
+    }
+    return false;
+  }
+
+  /** Check for authorization function calls: canAccess(), checkOwnership(), etc. */
+  private isAuthFunctionCall(node: ts.Node): boolean {
+    if (!ts.isCallExpression(node)) return false;
+    const callExpr = node.expression;
+    let callName: string | null = null;
+
+    if (ts.isIdentifier(callExpr)) {
+      callName = callExpr.text;
+    } else if (ts.isPropertyAccessExpression(callExpr)) {
+      callName = callExpr.name.text;
     }
 
-    // Admin/role-checking middleware function names
-    const adminMiddlewareNames = [
-      'isAdmin', 'requireAdmin', 'adminOnly',
-      'requireRole', 'checkRole', 'authorize',
-      'rbac', 'hasRole', 'ensureAdmin',
+    if (!callName) return false;
+
+    const authFunctionPatterns = [
+      /^(can|check|verify|validate|assert|require)(Access|Permission|Auth|Owner|Ownership|Role|Roles)$/i,
+      /^(authorize|authorise|isAuthorized|isOwner|isAllowed|isPermitted)$/i,
+      /^(hasPermission|hasAccess|hasRole|hasOwnership|belongsToUser)$/i,
+      /^(enforceAccess|enforceOwnership|enforcePermission|enforceAuth)$/i,
+      /^(ensure)(User)?(Owns|Ownership|Access|Permission|Auth)/i,
+      /^guard$/i,
+      // Throw-based authorization
+      /^throw(If|Unless)(Not)?(Owner|Authorized|Allowed|Permitted)/i,
+      // CRUD-scoped auth
+      /^(assert|check|verify)Can(Read|Write|Delete|Update|Access|Modify|View|Edit)/i,
+      // Resource-level
+      /^(checkResource|verifyResource)(Access|Ownership|Permission)/i,
+      // Scope-based (OAuth)
+      /^(require|check|verify)Scope$/i,
+      // Policy-based (CASL, etc.)
+      /^(can|cannot|ability\.can|ability\.cannot)$/i,
+      /^(checkPolicy|enforcePolicy|evaluatePolicy)$/i,
     ];
 
-    // Check middleware arguments (everything between the path and the last argument which is the handler)
-    // Pattern: app.get('/path', middleware1, middleware2, handler)
+    return authFunctionPatterns.some(p => p.test(callName!));
+  }
+
+  /** Check for NestJS guard/auth decorators */
+  private isAuthDecorator(node: ts.Node): boolean {
+    if (!ts.canHaveDecorators(node)) return false;
+    const decorators = ts.getDecorators(node);
+    if (!decorators) return false;
+    return decorators.some(d => {
+      const text = d.getText();
+      return /UseGuards|@Auth|@Roles|@RequireAuth|@Authorize|@RequirePermission|@Permissions|@CheckPolicies|@Policy|@Secured|@RolesGuard/.test(text);
+    });
+  }
+
+  /** Text-based fallback: check call expression text for ownership columns or auth identity */
+  private isOwnershipWhereText(node: ts.Node): boolean {
+    if (!ts.isCallExpression(node)) return false;
+
+    // Skip response/utility calls to avoid false suppression
+    // res.json({ user: req.user.name }) is NOT an ownership check
+    const expr = node.expression;
+    if (ts.isPropertyAccessExpression(expr)) {
+      const objName = this.getObjectName(expr.expression);
+      if (objName && /^(res|response|reply|ctx|console|logger|log)$/i.test(objName)) return false;
+      const methodName = expr.name.text;
+      if (/^(json|send|render|redirect|status|write|end|pipe|emit|dispatch|next|log|error|warn|info|debug|throw)$/i.test(methodName)) return false;
+    }
+
+    const text = node.getText();
+    if (IDORDetector.OWNERSHIP_COLUMNS_REGEX.test(text)) return true;
+    if (IDORDetector.AUTH_IDENTITY_PATTERNS.some(p => p.test(text))) return true;
+    return false;
+  }
+
+  /**
+   * Check if the route registration has admin, ownership, or role-checking middleware.
+   * Returns 'admin' for admin/role middleware, 'ownership' for ownership-checking middleware, 'none' otherwise.
+   */
+  private checkRouteMiddleware(queryNode: ts.Node): 'admin' | 'ownership' | 'none' {
+    const routeCall = this.findEnclosingRouteCall(queryNode);
+    if (!routeCall) {
+      return 'none';
+    }
+
     const args = routeCall.arguments;
     if (args.length < 2) {
-      return false;
+      return 'none';
     }
 
     // Middleware args are between the first (path) and last (handler) arguments
@@ -514,46 +722,45 @@ export class IDORDetector extends BaseEngine {
       const arg = args[i];
       const argText = arg.getText();
 
-      // Check if the middleware is a known admin function name
+      // Extract middleware name for Set lookups
+      let middlewareName: string | null = null;
+
       if (ts.isIdentifier(arg)) {
-        if (adminMiddlewareNames.some(name => name.toLowerCase() === arg.text.toLowerCase())) {
-          return true;
+        middlewareName = arg.text;
+      } else if (ts.isCallExpression(arg)) {
+        const callExpr = arg.expression;
+        if (ts.isIdentifier(callExpr)) {
+          middlewareName = callExpr.text;
+        } else if (ts.isPropertyAccessExpression(callExpr)) {
+          middlewareName = callExpr.name.text;
         }
       }
 
-      // Check if it's a call expression like requireRole('admin') or authorize('admin')
+      if (middlewareName) {
+        const lower = middlewareName.toLowerCase();
+        if (IDORDetector.ADMIN_MIDDLEWARE.has(lower)) return 'admin';
+        if (IDORDetector.OWNERSHIP_MIDDLEWARE.has(lower)) return 'ownership';
+      }
+
+      // Check call expression string arguments for 'admin'/'superadmin'
       if (ts.isCallExpression(arg)) {
-        const callExpr = arg.expression;
-        let callName: string | null = null;
-
-        if (ts.isIdentifier(callExpr)) {
-          callName = callExpr.text;
-        } else if (ts.isPropertyAccessExpression(callExpr)) {
-          callName = callExpr.name.text;
-        }
-
-        if (callName && adminMiddlewareNames.some(name => name.toLowerCase() === callName!.toLowerCase())) {
-          return true;
-        }
-
-        // Check for string arguments like 'admin', 'superadmin' passed to middleware functions
         for (const callArg of arg.arguments) {
           if (ts.isStringLiteral(callArg)) {
             const value = callArg.text.toLowerCase();
             if (value === 'admin' || value === 'superadmin' || value === 'super_admin') {
-              return true;
+              return 'admin';
             }
           }
         }
       }
 
-      // Check the text representation for admin-related patterns
+      // Text-based fallback for admin patterns
       if (argText.match(/\b(admin|superadmin|super_admin)\b/i)) {
-        return true;
+        return 'admin';
       }
     }
 
-    return false;
+    return 'none';
   }
 
   /**
@@ -643,15 +850,298 @@ export class IDORDetector extends BaseEngine {
     const handler = args[args.length - 1];
     const handlerText = handler.getText();
 
-    if (handlerText.match(/req(uest)?\.user/) || handlerText.match(/req(uest)?\.session\.user/) ||
-        handlerText.match(/ctx\.state\.user/) || handlerText.match(/request\.auth/)) {
-      // Handler references req.user / ctx.state.user / request.auth — auth is likely applied elsewhere (globally),
+    if (IDORDetector.AUTH_IDENTITY_PATTERNS.some(p => p.test(handlerText))) {
+      // Handler references an auth identity source — auth is likely applied elsewhere (globally),
       // so this is NOT a public route. Don't skip IDOR flagging.
       return false;
     }
 
     // No auth middleware and no req.user references — likely a public route, skip IDOR flagging
     return true;
+  }
+
+  /**
+   * AST-level check for ownership columns in the WHERE clause of the query call.
+   * Handles: object literal WHERE, Prisma nested, spread scope, chained .where(), .scope()
+   */
+  private hasWhereClauseOwnership(queryNode: ts.CallExpression): boolean {
+    // Check arguments of the query call for object literals containing ownership keys
+    for (const arg of queryNode.arguments) {
+      if (ts.isObjectLiteralExpression(arg)) {
+        // Look for a 'where' property or check top-level keys directly
+        for (const prop of arg.properties) {
+          // { where: { userId: x } }
+          if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name) && prop.name.text === 'where') {
+            if (ts.isObjectLiteralExpression(prop.initializer)) {
+              if (this.objectLiteralHasOwnershipKey(prop.initializer)) return true;
+            }
+          }
+          // Direct ownership key in top-level object: findOne({ userId: x, id: y })
+          if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) {
+            if (IDORDetector.OWNERSHIP_COLUMNS.has(prop.name.text)) return true;
+          }
+          if (ts.isShorthandPropertyAssignment(prop)) {
+            if (IDORDetector.OWNERSHIP_COLUMNS.has(prop.name.text)) return true;
+          }
+          // Spread: { ...req.scope }
+          if (ts.isSpreadAssignment(prop)) {
+            const spreadText = prop.expression.getText();
+            if (/scope/i.test(spreadText)) return true;
+          }
+        }
+      }
+    }
+
+    // Check for chained .where() calls in the method chain
+    // Walk UP from the query call to find if it's part of: knex('orders').where({id}).where({user_id: x})
+    let current: ts.Node = queryNode;
+    while (current.parent) {
+      // Check: someExpr.where({...}) where we are the child
+      if (ts.isPropertyAccessExpression(current.parent) && ts.isIdentifier(current.parent.name)) {
+        const accessName = current.parent.name.text;
+
+        // Check if parent.parent is a CallExpression (i.e., this is .where() or .scope() call)
+        if (current.parent.parent && ts.isCallExpression(current.parent.parent)) {
+          const chainCall = current.parent.parent;
+
+          if (accessName === 'where') {
+            for (const chainArg of chainCall.arguments) {
+              if (ts.isObjectLiteralExpression(chainArg)) {
+                if (this.objectLiteralHasOwnershipKey(chainArg)) return true;
+              }
+            }
+          }
+
+          if (accessName === 'scope') {
+            for (const chainArg of chainCall.arguments) {
+              const argText = chainArg.getText();
+              if (/user|owner|tenant|org/i.test(argText)) return true;
+            }
+          }
+
+          // Continue up the chain
+          current = chainCall;
+          continue;
+        }
+      }
+
+      // Also check DOWN: if queryNode is part of a chain and a sibling .where() has ownership
+      // e.g., knex('orders').where({id: x}).where({user_id: y}).first()
+      // Here the queryNode might be .first() but .where({user_id}) is in the chain
+      if (ts.isCallExpression(current.parent)) {
+        const parentCall = current.parent;
+        if (ts.isPropertyAccessExpression(parentCall.expression)) {
+          const methodName = parentCall.expression.name.text;
+          if (methodName === 'where') {
+            for (const chainArg of parentCall.arguments) {
+              if (ts.isObjectLiteralExpression(chainArg)) {
+                if (this.objectLiteralHasOwnershipKey(chainArg)) return true;
+              }
+            }
+          }
+          if (methodName === 'scope') {
+            for (const chainArg of parentCall.arguments) {
+              const argText = chainArg.getText();
+              if (/user|owner|tenant|org/i.test(argText)) return true;
+            }
+          }
+        }
+      }
+
+      break;
+    }
+
+    // Text-based fallback: check full call text for ownership columns
+    const fullText = queryNode.getText();
+    if (IDORDetector.OWNERSHIP_COLUMNS_REGEX.test(fullText)) return true;
+
+    // Check if any WHERE-clause argument text contains auth identity (e.g., Prisma nested: { user: { id: req.user.id } })
+    for (const arg of queryNode.arguments) {
+      if (ts.isObjectLiteralExpression(arg)) {
+        for (const prop of arg.properties) {
+          if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name) && prop.name.text === 'where') {
+            const whereText = prop.initializer.getText();
+            if (IDORDetector.AUTH_IDENTITY_PATTERNS.some(p => p.test(whereText))) return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Recursively check if an ObjectLiteralExpression contains ownership column keys.
+   * Handles PropertyAssignment, ShorthandPropertyAssignment, SpreadAssignment, and nested objects.
+   */
+  private objectLiteralHasOwnershipKey(obj: ts.ObjectLiteralExpression): boolean {
+    for (const prop of obj.properties) {
+      if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) {
+        if (IDORDetector.OWNERSHIP_COLUMNS.has(prop.name.text)) return true;
+        // Recurse into nested objects: { user: { id: req.user.id } }
+        if (ts.isObjectLiteralExpression(prop.initializer)) {
+          if (this.objectLiteralHasOwnershipKey(prop.initializer)) return true;
+        }
+      }
+      if (ts.isShorthandPropertyAssignment(prop)) {
+        if (IDORDetector.OWNERSHIP_COLUMNS.has(prop.name.text)) return true;
+      }
+      if (ts.isSpreadAssignment(prop)) {
+        const spreadText = prop.expression.getText();
+        if (/scope/i.test(spreadText)) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Detect post-query ownership check pattern:
+   * const order = await Order.findByPk(req.params.id);
+   * if (order.userId !== req.user.id) return res.status(403).json({});
+   */
+  private hasPostQueryOwnershipCheck(queryNode: ts.CallExpression): boolean {
+    // Step 1: Check if query result is assigned to a variable
+    let varName: string | null = null;
+    let assignParent: ts.Node = queryNode;
+
+    // Walk up through AwaitExpression
+    if (assignParent.parent && ts.isAwaitExpression(assignParent.parent)) {
+      assignParent = assignParent.parent;
+    }
+    // Check for VariableDeclaration
+    if (assignParent.parent && ts.isVariableDeclaration(assignParent.parent)) {
+      const decl = assignParent.parent;
+      if (ts.isIdentifier(decl.name)) {
+        varName = decl.name.text;
+      }
+    }
+
+    if (!varName) return false;
+
+    // Step 2: Find enclosing function scope
+    let functionScope = queryNode.parent;
+    while (functionScope && !this.isFunctionLike(functionScope)) {
+      functionScope = functionScope.parent;
+    }
+    if (!functionScope) return false;
+
+    // Step 3: Scan function body for ownership comparison or helper call
+    let hasCheck = false;
+
+    traverse(functionScope, (node) => {
+      if (hasCheck) return;
+
+      // Pattern A: if (varName.ownershipColumn !== authIdentity)
+      if (ts.isIfStatement(node)) {
+        const condText = node.expression.getText();
+        // Check if condition references varName.ownershipColumn
+        const ownershipAccess = new RegExp(`\\b${varName}\\.\\w+`);
+        if (ownershipAccess.test(condText)) {
+          // Check if condition also references an auth identity pattern
+          if (IDORDetector.AUTH_IDENTITY_PATTERNS.some(p => p.test(condText))) {
+            hasCheck = true;
+            return;
+          }
+          // Check if any ownership column name is in the condition
+          if (IDORDetector.OWNERSHIP_COLUMNS_REGEX.test(condText)) {
+            hasCheck = true;
+            return;
+          }
+        }
+      }
+
+      // Pattern B: Helper function calls with varName as argument
+      if (ts.isCallExpression(node)) {
+        const callExpr = node.expression;
+        let callName: string | null = null;
+
+        if (ts.isIdentifier(callExpr)) {
+          callName = callExpr.text;
+        } else if (ts.isPropertyAccessExpression(callExpr)) {
+          callName = callExpr.name.text;
+        }
+
+        if (callName) {
+          const authHelperPatterns = [
+            /^(ensure|check|verify|validate|assert|require)(User)?(Owns|Ownership|Access|Permission|Auth)/i,
+            /^(isOwner|isAllowed|isPermitted|belongsToUser)$/i,
+          ];
+
+          if (authHelperPatterns.some(p => p.test(callName!))) {
+            // Check if one of the arguments references our variable
+            const argsText = node.arguments.map(a => a.getText()).join(' ');
+            if (argsText.includes(varName)) {
+              hasCheck = true;
+              return;
+            }
+          }
+        }
+      }
+
+      // Pattern C: throw after ownership comparison in same block
+      if (ts.isThrowStatement(node)) {
+        const throwText = node.getText();
+        if (/forbidden|unauthorized|access.denied/i.test(throwText)) {
+          // Check if a preceding sibling is an if-statement with ownership check
+          // Simple heuristic: if we're in a function with a throw and the variable is used, it's likely auth
+          const funcText = functionScope!.getText();
+          if (funcText.includes(`${varName}.`) && IDORDetector.OWNERSHIP_COLUMNS_REGEX.test(funcText)) {
+            hasCheck = true;
+            return;
+          }
+        }
+      }
+    });
+
+    return hasCheck;
+  }
+
+  /**
+   * Check if the file has router-level or app-level middleware that handles auth/ownership.
+   * Detects: router.use(checkOwnership), app.use(requireAdmin), etc.
+   */
+  private hasRouterLevelAuthMiddleware(queryNode: ts.Node): boolean {
+    let sourceFile: ts.Node = queryNode;
+    while (sourceFile && !ts.isSourceFile(sourceFile)) {
+      sourceFile = sourceFile.parent;
+    }
+    if (!sourceFile) return false;
+
+    let found = false;
+
+    traverse(sourceFile, (node) => {
+      if (found) return;
+      if (!ts.isCallExpression(node)) return;
+
+      const expr = node.expression;
+      if (!ts.isPropertyAccessExpression(expr)) return;
+      if (expr.name.text !== 'use') return;
+
+      const objName = this.getObjectName(expr.expression);
+      if (!objName || !/^(app|router|route|server|api|fastify|instance)$/i.test(objName)) return;
+
+      for (const arg of node.arguments) {
+        let middlewareName: string | null = null;
+
+        if (ts.isIdentifier(arg)) {
+          middlewareName = arg.text;
+        } else if (ts.isCallExpression(arg)) {
+          if (ts.isIdentifier(arg.expression)) {
+            middlewareName = arg.expression.text;
+          } else if (ts.isPropertyAccessExpression(arg.expression)) {
+            middlewareName = arg.expression.name.text;
+          }
+        }
+
+        if (middlewareName) {
+          const lower = middlewareName.toLowerCase();
+          if (IDORDetector.ADMIN_MIDDLEWARE.has(lower)) { found = true; return; }
+          if (IDORDetector.OWNERSHIP_MIDDLEWARE.has(lower)) { found = true; return; }
+        }
+      }
+    });
+
+    return found;
   }
 
   /**
@@ -668,10 +1158,10 @@ export class IDORDetector extends BaseEngine {
         if (ts.isPropertyAccessExpression(expr)) {
           const methodName = expr.name.text.toLowerCase();
 
-          // Express/Koa style: app.get(), router.post(), etc.
+          // Express/Koa/Fastify style: app.get(), router.post(), fastify.get(), etc.
           if (httpMethods.includes(methodName)) {
             const objName = this.getObjectName(expr.expression);
-            if (objName && /^(app|router|route|server|api)$/i.test(objName)) {
+            if (objName && /^(app|router|route|server|api|fastify|instance)$/i.test(objName)) {
               return current;
             }
           }
@@ -738,10 +1228,10 @@ export class IDORDetector extends BaseEngine {
           const methodName = expr.name.text.toLowerCase();
           const httpMethods = ['get', 'post', 'put', 'patch', 'delete', 'all'];
 
-          // Express/Koa style: app.get(), router.post(), etc.
+          // Express/Koa/Fastify style: app.get(), router.post(), fastify.get(), etc.
           if (httpMethods.includes(methodName)) {
             const objName = this.getObjectName(expr.expression);
-            if (objName && /^(app|router|route|server|api)$/i.test(objName)) {
+            if (objName && /^(app|router|route|server|api|fastify|instance)$/i.test(objName)) {
               return true;
             }
           }

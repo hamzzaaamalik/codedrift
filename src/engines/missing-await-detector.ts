@@ -1,22 +1,100 @@
 /**
  * Missing Await Detector
- * Detects fire-and-forget async function calls that should be awaited
- * Priority: CRITICAL (causes race conditions, data corruption)
+ * Detects fire-and-forget async function calls that should be awaited.
+ * Priority: CRITICAL (causes race conditions, data corruption, silent failures)
+ *
+ * Detection strategies:
+ *   S1: Same-file async declaration (async keyword)
+ *   S2: TypeScript Promise<T> return type annotation
+ *   S3: Known async API database (ORM, fs, HTTP, Redis, etc.)
+ *   S4: this.method() where method is async in same class
+ *   S5: Naming heuristics (fetch*, save*, load*, etc.)
+ *   S6: Import from async-sounding module
+ *   S7: Used with .then()/await elsewhere in same file
+ *   S8: Matches strong async naming pattern
  */
 
 import { BaseEngine } from './base-engine.js';
 import { AnalysisContext, Issue } from '../types/index.js';
 import { traverse, ASTHelpers } from '../core/parser.js';
+import { isKnownAsyncAPI, getAPICategory, KNOWN_ASYNC_METHODS } from './known-async-apis.js';
+import { SYNC_OBJECTS, SYNC_METHODS, matchesSyncPrefix, matchesSyncObjectPattern } from './known-sync-apis.js';
 import * as ts from 'typescript';
+
+// ──────────────────── Interfaces ────────────────────
+
+interface BlockContext {
+  insideTryBlock: boolean;
+  insideCatchBlock: boolean;
+  insideFinallyBlock: boolean;
+  insideLoop: boolean;
+  insideConditional: boolean;
+}
+
+interface SequenceGapInfo {
+  nextAwaitedName: string | null;
+}
+
+// ──────────────────── Detector ────────────────────
 
 export class MissingAwaitDetector extends BaseEngine {
   readonly name = 'missing-await';
+
+  // ── Fire-and-forget exact matches ──
+  private static readonly FIRE_AND_FORGET = new Set([
+    'log', 'logActivity', 'logEvent', 'logError', 'logWarning', 'logInfo',
+    'track', 'trackEvent', 'trackUser', 'trackAction', 'trackPageView',
+    'record', 'recordMetric', 'recordEvent', 'recordActivity',
+    'report', 'reportError', 'reportEvent', 'analytics', 'sendAnalytics',
+    'emit', 'publish', 'dispatch', 'trigger', 'fire',
+    'monitor', 'ping', 'heartbeat', 'healthCheck',
+    'warmCache', 'prefetch', 'preload',
+    'notify', 'sendNotification', 'alert',
+  ]);
+
+  // ── Timer functions ──
+  private static readonly TIMER_FUNCTIONS = new Set([
+    'setTimeout', 'setInterval', 'setImmediate', 'queueMicrotask',
+  ]);
+
+  // ── Test framework callbacks ──
+  private static readonly TEST_FUNCTIONS = new Set([
+    'it', 'test', 'describe', 'beforeEach', 'afterEach',
+    'beforeAll', 'afterAll', 'before', 'after',
+  ]);
+
+  // ── Route handler registration methods ──
+  private static readonly ROUTE_METHODS = new Set([
+    'get', 'post', 'put', 'delete', 'patch', 'use', 'all', 'head', 'options',
+  ]);
+
+  // ── Route handler objects ──
+  private static readonly ROUTE_OBJECTS = new Set([
+    'app', 'router', 'server', 'fastify',
+  ]);
+
+  // ── Event handler methods ──
+  private static readonly EVENT_METHODS = new Set([
+    'on', 'once', 'addEventListener', 'addListener',
+  ]);
+
+  // ── Framework decorators that make methods fire-and-forget ──
+  private static readonly FRAMEWORK_DECORATORS = new Set([
+    // NestJS HTTP
+    'Get', 'Post', 'Put', 'Patch', 'Delete', 'All', 'Head', 'Options',
+    // NestJS scheduling & events
+    'Cron', 'OnEvent', 'Subscribe', 'EventHandler', 'MessageHandler',
+    'Process', 'OnQueueActive', 'OnQueueCompleted', 'OnQueueFailed',
+    // GraphQL
+    'Query', 'Mutation', 'Subscription', 'ResolveField',
+  ]);
+
+  // ──────────────────── Main Analyze ────────────────────
 
   async analyze(context: AnalysisContext): Promise<Issue[]> {
     const issues: Issue[] = [];
 
     traverse(context.sourceFile, (node) => {
-      // Check call expressions that might be async
       if (ts.isCallExpression(node)) {
         const issue = this.checkMissingAwait(node, context);
         if (issue) {
@@ -28,62 +106,61 @@ export class MissingAwaitDetector extends BaseEngine {
     return issues;
   }
 
+  // ──────────────────── Core Detection ────────────────────
+
   /**
-   * Check if a call expression is an unawaited async function
-   * Now with multi-level confidence scoring
+   * Check if a call expression is an unawaited async function.
+   * Multi-stage pipeline: skip checks → async detection → context → severity → suggestion.
    */
   private checkMissingAwait(node: ts.CallExpression, context: AnalysisContext): Issue | null {
-    // Skip if already awaited
-    if (this.isAwaited(node)) {
-      return null;
-    }
+    // ── Skip Pipeline ──
 
-    // Skip if void operator used (intentional fire-and-forget)
-    if (this.hasVoidOperator(node)) {
-      return null;
-    }
+    // 1. Already awaited
+    if (this.isAwaited(node)) return null;
 
-    // Skip if promise is handled with .then() or .catch()
-    if (this.hasPromiseHandler(node)) {
-      return null;
-    }
+    // 2. void prefix (intentional fire-and-forget)
+    if (this.hasVoidOperator(node)) return null;
 
-    // Skip if assigned to variable (may be awaited later)
-    if (this.isAssignedToVariable(node)) {
-      return null;
-    }
+    // 3. Promise chain (.then/.catch/.finally)
+    if (this.hasPromiseHandler(node)) return null;
 
-    // Track whether we've already confirmed the method is async (e.g. via class member lookup)
-    let knownAsync = false;
+    // 3.5 Immediate chain — developer treats return as sync value
+    //     e.g., fn().toString(), fn().length, !fn(), fn() + 1, `${fn()}`, ...fn()
+    if (this.hasImmediateChain(node)) return null;
 
-    // Skip this.* method calls ONLY if the target method is not declared async in the same class
-    if (ts.isPropertyAccessExpression(node.expression)) {
-      if (node.expression.expression.kind === ts.SyntaxKind.ThisKeyword) {
-        // Check if this method is declared async in the enclosing class
-        if (!this.isAsyncMethodInClass(node)) {
-          return null;
-        }
-        // Method IS async — continue analysis (don't skip)
-        knownAsync = true;
+    // 4. Callback-style call (last arg is (err, data) => ...)
+    if (this.isCallbackStyleCall(node)) return null;
+
+    // 5. Assigned to variable — check if handled later
+    const varInfo = this.getAssignedVariable(node);
+    if (varInfo) {
+      if (this.isVariableHandledLater(varInfo.name, varInfo.node, node)) {
+        return null; // Variable is awaited/returned/passed later
       }
+      // Variable assigned but never handled — will flag below as warning
     }
 
-    // Skip if not inside an async function (await is invalid here — not a real issue)
-    if (!this.isInsideAsyncFunction(node)) {
-      return null;
+    // 6. this.* method calls — skip if method is NOT async in same class
+    let knownAsync = false;
+    let className: string | null = null;
+    if (ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.expression.kind === ts.SyntaxKind.ThisKeyword) {
+      const asyncResult = this.isAsyncMethodInClass(node);
+      if (!asyncResult.isAsync) return null;
+      knownAsync = true;
+      className = asyncResult.className;
     }
 
-    // Skip if inside a top-level async context (framework callbacks, IIFEs, etc.)
-    if (this.isTopLevelAsyncContext(node)) {
-      return null;
-    }
+    // 7. Must be inside an async function (await is invalid otherwise)
+    if (!this.isInsideAsyncFunction(node)) return null;
 
-    // Skip if inside Promise.all/Promise.allSettled — collective await handles it
-    if (this.isInsidePromiseAll(node)) {
-      return null;
-    }
+    // 8. Top-level async context (framework callbacks, IIFEs, etc.)
+    if (this.isTopLevelAsyncContext(node)) return null;
 
-    // Get function name for better detection
+    // 9. Inside Promise.all/allSettled/race/any
+    if (this.isInsidePromiseAll(node)) return null;
+
+    // ── Extract call info ──
     const { expression } = node;
     let functionName: string | null = null;
     let objectName: string | null = null;
@@ -95,175 +172,329 @@ export class MissingAwaitDetector extends BaseEngine {
       objectName = this.getObjectName(expression.expression);
     }
 
-    // Skip intentional fire-and-forget patterns
-    if (functionName && this.isIntentionalFireAndForget(functionName, objectName)) {
+    // 10. Intentional fire-and-forget patterns
+    if (functionName && this.isIntentionalFireAndForget(functionName, objectName)) return null;
+
+    // ── Async Detection Strategies (ordered by confidence) ──
+
+    // S1: Declared async in same file
+    const isDeclaredAsync = knownAsync
+      || (functionName ? this.isDeclaredAsAsync(functionName, context) : false);
+
+    // S2: TypeScript Promise<T> return type annotation
+    const hasPromiseReturn = !isDeclaredAsync && functionName
+      ? this.hasPromiseReturnType(functionName, context)
+      : false;
+
+    // S3: Known async API database
+    const isKnownAPI = !isDeclaredAsync && !hasPromiseReturn
+      ? isKnownAsyncAPI(objectName, functionName || '')
+      : false;
+
+    // S4: this.method() already handled above (knownAsync)
+
+    // High confidence: any of S1-S4
+    const isHighConfidence = isDeclaredAsync || hasPromiseReturn || isKnownAPI;
+
+    // Skip heuristics if this is a known sync method ON AN OBJECT (e.g., crypto.update()).
+    // Bare function calls (no objectName) must reach S5-S7 cross-file heuristics first.
+    if (!isHighConfidence && functionName && objectName && this.isSyncMethod(functionName, objectName)) {
       return null;
     }
 
-    // Check if function is declared async (highest confidence)
-    // Use knownAsync if we already confirmed via class member lookup
-    const isDeclaredAsync = knownAsync || (functionName ? this.isDeclaredAsAsync(functionName, context) : false);
-
-    // Cross-file heuristic: naming conventions suggest async (medium confidence)
-    const isHeuristicallyAsync = !isDeclaredAsync && functionName ? this.isLikelyAsync(functionName) : false;
-
-    // Cross-file heuristic: imported from async-sounding module (medium confidence)
-    const isFromAsyncModule = !isDeclaredAsync && functionName ? this.isImportedFromAsyncModule(functionName, context) : false;
-
-    // Cross-file heuristic: used with .then() or await elsewhere in file (medium confidence)
-    const isUsedAsAsync = !isDeclaredAsync && functionName ? this.isUsedAsAsyncElsewhere(functionName, context) : false;
-
-    // Combine cross-file heuristics into a single flag
+    // S5-S7: Cross-file heuristics (medium confidence)
+    const isHeuristicallyAsync = !isHighConfidence && functionName ? this.isLikelyAsync(functionName) : false;
+    const isFromAsyncModule = !isHighConfidence && functionName ? this.isImportedFromAsyncModule(functionName, context) : false;
+    const isUsedAsAsync = !isHighConfidence && functionName ? this.isUsedAsAsyncElsewhere(functionName, context) : false;
     const isCrossFileAsync = isHeuristicallyAsync || isFromAsyncModule || isUsedAsAsync;
 
-    // Check if matches async naming patterns (medium confidence)
-    const matchesAsyncPattern = functionName ? this.matchesAsyncPattern(functionName, objectName) : false;
+    // S8: Pattern matching (medium confidence)
+    const matchesPattern = !isHighConfidence && !isCrossFileAsync && functionName
+      ? this.matchesAsyncPattern(functionName, objectName)
+      : false;
 
-    // Check if return value is used (affects confidence)
+    // Determine overall async likelihood
+    const isLikelyAsync = isHighConfidence || isCrossFileAsync || matchesPattern;
+    if (!isLikelyAsync) return null;
+
+    // ── Sync prefix veto (pattern-match only — no cross-file evidence) ──
+    if (!isHighConfidence && !isCrossFileAsync && functionName && matchesSyncPrefix(functionName)) {
+      if (!isKnownAsyncAPI(objectName, functionName)) {
+        return null;
+      }
+    }
+
+    // ── Sync usage veto — variable used synchronously later (non-high confidence only) ──
+    if (!isHighConfidence && varInfo) {
+      if (this.isResultUsedSynchronously(varInfo.name, varInfo.node)) {
+        return null;
+      }
+    }
+
+    // ── Return value usage check ──
     const returnValueUsed = this.isReturnValueUsed(node);
 
-    // Determine if this is likely an async function
-    let confidence: 'high' | 'medium' | 'low' = 'low';
-    let message = 'Async function called without await';
-    let suggestion = 'Add await or explicitly use void operator for fire-and-forget';
-
-    if (isDeclaredAsync && returnValueUsed) {
-      // HIGH confidence: Declared as async and return value is used
-      confidence = 'high';
-      message = `Async function '${functionName}' called without await`;
-      suggestion = `Add 'await' before the call: \`await ${functionName}(...)\``;
-    } else if (isDeclaredAsync) {
-      // MEDIUM confidence: Declared as async but return value not used (might be fire-and-forget)
-      confidence = 'medium';
-      message = `Async function '${functionName}' called without await (fire-and-forget?)`;
-      suggestion = `If this must complete before continuing, use: \`await ${functionName}(...)\`. Otherwise add \`void ${functionName}(...)\` to make fire-and-forget intent explicit.`;
-    } else if (isCrossFileAsync && returnValueUsed) {
-      // MEDIUM confidence: Cross-file heuristic suggests async and return value is used
-      confidence = 'medium';
-      message = `Function '${functionName}' is likely async but not awaited`;
-      suggestion = `Add 'await' before the call: \`await ${functionName}(...)\``;
-    } else if (isCrossFileAsync) {
-      // MEDIUM confidence: Cross-file heuristic suggests async but return value not used
-      confidence = 'medium';
-      message = `Function '${functionName}' is likely async but not awaited (fire-and-forget?)`;
-      suggestion = `If this must complete before continuing, use: \`await ${functionName}(...)\`. Otherwise add \`void ${functionName}(...)\` to make fire-and-forget intent explicit.`;
-    } else if (matchesAsyncPattern && returnValueUsed) {
-      // MEDIUM confidence: Matches pattern and return value used
-      confidence = 'medium';
-      message = `Function '${functionName}' appears async but not awaited`;
-      suggestion = `If '${functionName}' is async, prefix with \`await ${functionName}(...)\`. Otherwise no change needed.`;
-    } else if (matchesAsyncPattern) {
-      // LOW confidence: Matches pattern but return value not used
-      confidence = 'low';
-      message = `Function '${functionName}' might be async but not awaited`;
-      suggestion = 'Verify if this function is async and should be awaited';
-      return null; // Skip low confidence fire-and-forget cases
-    } else {
-      // Not enough evidence - skip
+    // Skip low-confidence fire-and-forget (pattern match + not used)
+    if (!isHighConfidence && !isCrossFileAsync && matchesPattern && !returnValueUsed) {
       return null;
     }
 
-    return this.createIssue(context, node, message, {
-      severity: confidence === 'high' ? 'error' : 'warning',
-      confidence,
-      suggestion,
-    });
+    // ── Context Classification ──
+    const blockContext = this.classifyBlockContext(node);
+    const sequenceGap = this.detectSequenceGap(node);
+    const apiCategory = isKnownAPI ? getAPICategory(objectName, functionName || '') : null;
+
+    // Mongoose .exec() detection — classify the inner method
+    let effectiveApiCategory = apiCategory;
+    if (!effectiveApiCategory && functionName === 'exec') {
+      const mongooseInfo = this.isMongooseExecCall(node);
+      if (mongooseInfo) {
+        effectiveApiCategory = getAPICategory(mongooseInfo.objectName, mongooseInfo.innerMethodName);
+      }
+    }
+
+    // ── Severity ──
+    const { severity, confidence } = this.classifySeverity(
+      functionName || '', objectName, blockContext, sequenceGap,
+      returnValueUsed, effectiveApiCategory, isHighConfidence, isCrossFileAsync, node,
+    );
+
+    // ── Suggestion ──
+    const callName = objectName ? `${objectName}.${functionName}` : (functionName || 'unknown');
+    const { message, suggestion } = this.generateContextualSuggestion(
+      callName, functionName || '', blockContext, sequenceGap,
+      effectiveApiCategory, isHighConfidence, isCrossFileAsync, returnValueUsed,
+      className, varInfo ? varInfo.name : null,
+    );
+
+    return this.createIssue(context, node, message, { severity, confidence, suggestion });
   }
 
-  /**
-   * Check if node is awaited
-   */
+  // ──────────────────── Skip Rules ────────────────────
+
   private isAwaited(node: ts.Node): boolean {
-    const parent = node.parent;
-    return parent && ts.isAwaitExpression(parent);
+    if (!node.parent) return false;
+    if (ts.isAwaitExpression(node.parent)) return true;
+    // Check if this call is part of a chain that's ultimately awaited/voided/handled
+    // e.g., await User.findOne(q).exec() — inner findOne() is consumed by .exec() which is awaited
+    // Also handles: await (foo().bar()), foo().bar().then(...), void foo().bar()
+    let current: ts.Node = node;
+    while (current.parent) {
+      const p = current.parent;
+      if (ts.isAwaitExpression(p) || ts.isVoidExpression(p)) return true;
+      // Chain continues through property access, call expressions, and parenthesized exprs
+      if (ts.isCallExpression(p) || ts.isParenthesizedExpression(p)) {
+        current = p;
+        continue;
+      }
+      if (ts.isPropertyAccessExpression(p)) {
+        // If the chain accesses .then/.catch/.finally, the promise is handled
+        const name = p.name.text;
+        if (name === 'then' || name === 'catch' || name === 'finally') return true;
+        current = p;
+        continue;
+      }
+      break;
+    }
+    return false;
   }
 
-  /**
-   * Check if node has void operator (void someAsyncFunc())
-   */
   private hasVoidOperator(node: ts.Node): boolean {
-    const parent = node.parent;
-    return parent && ts.isVoidExpression(parent);
+    return !!(node.parent && ts.isVoidExpression(node.parent));
   }
 
-  /**
-   * Check if promise is handled with .then() or .catch()
-   */
   private hasPromiseHandler(node: ts.CallExpression): boolean {
     const parent = node.parent;
-
-    if (!parent || !ts.isPropertyAccessExpression(parent)) {
-      return false;
-    }
-
-    const methodName = parent.name.text;
-    return methodName === 'then' || methodName === 'catch' || methodName === 'finally';
+    if (!parent || !ts.isPropertyAccessExpression(parent)) return false;
+    const name = parent.name.text;
+    return name === 'then' || name === 'catch' || name === 'finally';
   }
 
   /**
-   * Check if call result is assigned to a variable
+   * Immediate chain — return value consumed as sync value.
+   * If fn().toString() or fn().length or !fn() or fn() + x, the developer
+   * treats the return as a concrete type. If it were a Promise, these would
+   * produce "[object Promise]" or NaN — clearly the developer knows it's sync.
    */
-  private isAssignedToVariable(node: ts.CallExpression): boolean {
+  private hasImmediateChain(node: ts.CallExpression): boolean {
     const parent = node.parent;
+    if (!parent) return false;
 
-    // Variable declaration: const x = asyncFunc()
-    if (parent && ts.isVariableDeclaration(parent)) {
+    // .toString(), .property — sync chain
+    if (ts.isPropertyAccessExpression(parent) && parent.expression === node) {
+      const name = parent.name.text;
+      // Exception: .then/.catch/.finally are Promise handling, NOT sync chains
+      if (name === 'then' || name === 'catch' || name === 'finally') return false;
+      // Exception: .exec() is a Mongoose async query terminal
+      if (name === 'exec') return false;
       return true;
     }
 
-    // Assignment: x = asyncFunc()
-    if (parent && ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+    // ['key'] bracket access
+    if (ts.isElementAccessExpression(parent) && parent.expression === node) return true;
+
+    // !fn(), +fn(), -fn(), typeof fn()
+    if (ts.isPrefixUnaryExpression(parent) && parent.operand === node) return true;
+
+    // fn() + x, fn() === x (arithmetic, comparison, but NOT assignment)
+    if (ts.isBinaryExpression(parent) && (parent.left === node || parent.right === node)) {
+      const op = parent.operatorToken.kind;
+      // Skip assignment operators — those store the value, not consume it
+      if (op === ts.SyntaxKind.EqualsToken ||
+          op === ts.SyntaxKind.PlusEqualsToken ||
+          op === ts.SyntaxKind.MinusEqualsToken) return false;
+      // Skip logical operators — value flows through, doesn't prove sync
+      if (op === ts.SyntaxKind.AmpersandAmpersandToken ||
+          op === ts.SyntaxKind.BarBarToken ||
+          op === ts.SyntaxKind.QuestionQuestionToken) return false;
       return true;
     }
 
-    // Property assignment: obj.x = asyncFunc()
-    if (parent && ts.isPropertyAssignment(parent)) {
-      return true;
+    // `${fn()}` template literal
+    if (ts.isTemplateSpan(parent)) return true;
+
+    // ...fn() spread
+    if (ts.isSpreadElement(parent) && parent.expression === node) return true;
+
+    // const { a, b } = fn() — destructuring
+    if (ts.isVariableDeclaration(parent) && parent.initializer === node) {
+      if (ts.isObjectBindingPattern(parent.name) || ts.isArrayBindingPattern(parent.name)) return true;
     }
 
     return false;
   }
 
   /**
-   * Check if node is inside an async function context
-   * (await is only valid inside async functions)
+   * Callback-style call: last argument is (err, data) => ...
+   */
+  private isCallbackStyleCall(node: ts.CallExpression): boolean {
+    if (node.arguments.length === 0) return false;
+    const lastArg = node.arguments[node.arguments.length - 1];
+    if (!ASTHelpers.isFunctionLike(lastArg)) return false;
+    const funcLike = lastArg as ts.FunctionLikeDeclaration;
+    const params = funcLike.parameters;
+    if (params.length < 2) return false;
+    const firstParam = params[0];
+    if (ts.isIdentifier(firstParam.name)) {
+      const name = firstParam.name.text.toLowerCase();
+      return name === 'err' || name === 'error' || name === 'e' || name === '_';
+    }
+    return false;
+  }
+
+  /**
+   * Get the variable name if the call result is assigned.
+   */
+  private getAssignedVariable(node: ts.CallExpression): { name: string; node: ts.Node } | null {
+    const parent = node.parent;
+    if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
+      return { name: parent.name.text, node: parent };
+    }
+    if (parent && ts.isBinaryExpression(parent) &&
+        parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isIdentifier(parent.left)) {
+      return { name: parent.left.text, node: parent };
+    }
+    if (parent && ts.isPropertyAssignment(parent)) {
+      return { name: '__property__', node: parent }; // treated as handled
+    }
+    return null;
+  }
+
+  /**
+   * Scan forward in the enclosing function to check if a stored promise variable
+   * is later awaited, returned, .then()-chained, or passed to Promise.all.
+   */
+  private isVariableHandledLater(varName: string, assignmentNode: ts.Node, _callNode: ts.CallExpression): boolean {
+    // Property assignment is always considered handled
+    if (varName === '__property__') return true;
+
+    const enclosingFunc = this.findEnclosingAsyncFunction(assignmentNode);
+    if (!enclosingFunc) return true; // Conservative: assume handled
+
+    const body = 'body' in enclosingFunc ? enclosingFunc.body : null;
+    if (!body) return true;
+
+    let found = false;
+    let pastAssignment = false;
+
+    traverse(body, (n) => {
+      if (found) return;
+      if (n === assignmentNode) { pastAssignment = true; return; }
+      if (!pastAssignment) return;
+
+      // await variableName
+      if (ts.isAwaitExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === varName) {
+        found = true; return;
+      }
+
+      // variableName.then( or .catch(
+      if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.expression) &&
+          n.expression.text === varName &&
+          (n.name.text === 'then' || n.name.text === 'catch' || n.name.text === 'finally')) {
+        found = true; return;
+      }
+
+      // return variableName
+      if (ts.isReturnStatement(n) && n.expression && ts.isIdentifier(n.expression) && n.expression.text === varName) {
+        found = true; return;
+      }
+
+      // Promise.all/allSettled containing variableName
+      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)) {
+        const obj = this.getObjectName(n.expression.expression);
+        const method = n.expression.name.text;
+        if (obj === 'Promise' && (method === 'all' || method === 'allSettled' || method === 'race' || method === 'any')) {
+          let hasVar = false;
+          traverse(n, (arg) => {
+            if (ts.isIdentifier(arg) && arg.text === varName) hasVar = true;
+          });
+          if (hasVar) { found = true; return; }
+        }
+      }
+
+      // Variable passed as function argument (excluding sync/logging functions)
+      if (ts.isCallExpression(n)) {
+        const calledName = ts.isPropertyAccessExpression(n.expression)
+          ? this.getObjectName(n.expression.expression)
+          : ts.isIdentifier(n.expression) ? n.expression.text : null;
+        const isSyncCaller = calledName && SYNC_OBJECTS.has(calledName);
+        if (!isSyncCaller) {
+          for (const arg of n.arguments) {
+            if (ts.isIdentifier(arg) && arg.text === varName) { found = true; return; }
+          }
+        }
+      }
+    });
+
+    return found;
+  }
+
+  /**
+   * Check if node is inside an async function context.
    */
   private isInsideAsyncFunction(node: ts.Node): boolean {
     let current = node.parent;
     while (current) {
-      if (
-        ts.isFunctionDeclaration(current) ||
-        ts.isFunctionExpression(current) ||
-        ts.isArrowFunction(current) ||
-        ts.isMethodDeclaration(current)
-      ) {
+      if (ts.isFunctionDeclaration(current) || ts.isFunctionExpression(current) ||
+          ts.isArrowFunction(current) || ts.isMethodDeclaration(current)) {
         return !!(current.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword));
       }
       current = current.parent;
     }
-    return false; // top-level module scope — no async context
+    return false;
   }
 
   /**
-   * Find the nearest enclosing async function for a given node.
-   * Returns the async function node, or null if not inside one.
+   * Find nearest enclosing async function.
    */
   private findEnclosingAsyncFunction(node: ts.Node): ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration | null {
     let current = node.parent;
     while (current) {
-      if (
-        ts.isFunctionDeclaration(current) ||
-        ts.isFunctionExpression(current) ||
-        ts.isArrowFunction(current) ||
-        ts.isMethodDeclaration(current)
-      ) {
+      if (ts.isFunctionDeclaration(current) || ts.isFunctionExpression(current) ||
+          ts.isArrowFunction(current) || ts.isMethodDeclaration(current)) {
         const isAsync = current.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword);
-        if (isAsync) {
-          return current;
-        }
-        // If we hit a non-async function boundary, stop — the node is not
-        // directly inside an async function (it may be nested deeper).
-        return null;
+        return isAsync ? current : null;
       }
       current = current.parent;
     }
@@ -271,98 +502,50 @@ export class MissingAwaitDetector extends BaseEngine {
   }
 
   /**
-   * Determine if the unawaited async call is inside a "top-level async context"
-   * — a framework callback or IIFE where nothing can meaningfully await the
-   * enclosing function. In these cases flagging missing-await is noise.
-   *
-   * Recognized contexts:
-   *  1. Timer callbacks: setTimeout, setInterval, setImmediate, process.nextTick, queueMicrotask
-   *  2. Test framework callbacks: it, test, describe, beforeEach, afterEach, beforeAll, afterAll, before, after
-   *  3. Express/Fastify route handlers: app.get, router.post, fastify.put, server.delete, etc.
-   *  4. IIFEs (Immediately Invoked Function Expressions)
-   *  5. Event handler registrations: .on(), .once(), .addEventListener(), .addListener()
+   * Check if the enclosing async function is a top-level context
+   * (framework callback, IIFE, timer, test, route handler, event handler, decorated handler).
    */
   private isTopLevelAsyncContext(node: ts.Node): boolean {
     const enclosingAsync = this.findEnclosingAsyncFunction(node);
-    if (!enclosingAsync) {
-      return false;
-    }
+    if (!enclosingAsync) return false;
 
-    const parent = enclosingAsync.parent;
-    if (!parent) {
-      return false;
-    }
+    // IIFE
+    if (this.isIIFE(enclosingAsync)) return true;
 
-    // ── 4. IIFE check ──
-    // The async function is immediately invoked: (async () => { ... })()
-    // In the AST the function is wrapped in a ParenthesizedExpression which
-    // is the expression of a CallExpression, OR the function IS the expression
-    // of a CallExpression directly.
-    if (this.isIIFE(enclosingAsync)) {
-      return true;
-    }
+    // Framework decorated handler (@Get, @Cron, @OnEvent, @Query, etc.)
+    if (this.isFrameworkDecoratedHandler(enclosingAsync)) return true;
 
-    // ── 6. NestJS decorated handlers ──
-    // @Get(), @Post(), etc. — framework invokes these methods (method on a class, not a callback)
-    if (this.isNestJSHandler(enclosingAsync)) {
-      return true;
-    }
-
-    // For the remaining checks the async function must be an argument to a CallExpression.
-    // Walk up through parenthesized expressions to find the CallExpression.
+    // Remaining checks: async function must be argument to a CallExpression
     const callInfo = this.getEnclosingCallExpression(enclosingAsync);
-    if (!callInfo) {
-      return false;
-    }
+    if (!callInfo) return false;
 
-    const { callExpr } = callInfo;
-    const calleeName = this.getCalleeInfo(callExpr);
-    if (!calleeName) {
-      return false;
-    }
+    const calleeName = this.getCalleeInfo(callInfo.callExpr);
+    if (!calleeName) return false;
 
-    // ── 1. Timer / scheduler callbacks ──
-    const timerFunctions = new Set([
-      'setTimeout', 'setInterval', 'setImmediate', 'queueMicrotask',
-    ]);
-    if (timerFunctions.has(calleeName.fullName) || timerFunctions.has(calleeName.methodName)) {
+    // Timer callbacks
+    if (MissingAwaitDetector.TIMER_FUNCTIONS.has(calleeName.fullName) ||
+        MissingAwaitDetector.TIMER_FUNCTIONS.has(calleeName.methodName)) {
       return true;
     }
-    // process.nextTick
     if (calleeName.objectName === 'process' && calleeName.methodName === 'nextTick') {
       return true;
     }
 
-    // ── 2. Test framework callbacks ──
-    const testFunctions = new Set([
-      'it', 'test', 'describe', 'beforeEach', 'afterEach',
-      'beforeAll', 'afterAll', 'before', 'after',
-    ]);
-    if (testFunctions.has(calleeName.fullName) || testFunctions.has(calleeName.methodName)) {
+    // Test framework callbacks
+    if (MissingAwaitDetector.TEST_FUNCTIONS.has(calleeName.fullName) ||
+        MissingAwaitDetector.TEST_FUNCTIONS.has(calleeName.methodName)) {
       return true;
     }
 
-    // ── 3. Express / Fastify route handler registrations ──
-    const routeMethods = new Set([
-      'get', 'post', 'put', 'delete', 'patch', 'use', 'all',
-      'head', 'options',
-    ]);
-    const routeObjects = new Set([
-      'app', 'router', 'server', 'fastify',
-    ]);
-    if (
-      calleeName.objectName &&
-      routeObjects.has(calleeName.objectName) &&
-      routeMethods.has(calleeName.methodName)
-    ) {
+    // Route handler registrations
+    if (calleeName.objectName &&
+        MissingAwaitDetector.ROUTE_OBJECTS.has(calleeName.objectName) &&
+        MissingAwaitDetector.ROUTE_METHODS.has(calleeName.methodName)) {
       return true;
     }
 
-    // ── 5. Event handler registrations ──
-    const eventMethods = new Set([
-      'on', 'once', 'addEventListener', 'addListener',
-    ]);
-    if (eventMethods.has(calleeName.methodName)) {
+    // Event handler registrations
+    if (MissingAwaitDetector.EVENT_METHODS.has(calleeName.methodName)) {
       return true;
     }
 
@@ -370,25 +553,43 @@ export class MissingAwaitDetector extends BaseEngine {
   }
 
   /**
-   * Check if a function node is a NestJS handler decorated with @Get(), @Post(), etc.
+   * Check for framework decorators (NestJS HTTP, scheduling, events, GraphQL).
    */
-  private isNestJSHandler(funcNode: ts.Node): boolean {
+  private isFrameworkDecoratedHandler(funcNode: ts.Node): boolean {
     if (!ts.isMethodDeclaration(funcNode)) return false;
     const decorators = ts.canHaveDecorators(funcNode) ? ts.getDecorators(funcNode) : undefined;
-    if (!decorators) return false;
 
-    const httpDecorators = new Set(['Get', 'Post', 'Put', 'Patch', 'Delete', 'All', 'Head', 'Options']);
-    return decorators.some(d => {
+    // Check method decorators
+    const hasSkipDecorator = decorators?.some(d => {
       if (ts.isCallExpression(d.expression) && ts.isIdentifier(d.expression.expression)) {
-        return httpDecorators.has(d.expression.expression.text);
+        return MissingAwaitDetector.FRAMEWORK_DECORATORS.has(d.expression.expression.text);
+      }
+      if (ts.isIdentifier(d.expression)) {
+        return MissingAwaitDetector.FRAMEWORK_DECORATORS.has(d.expression.text);
       }
       return false;
     });
+    if (hasSkipDecorator) return true;
+
+    // Check if parent class has @Resolver decorator
+    const parent = funcNode.parent;
+    if (parent && (ts.isClassDeclaration(parent) || ts.isClassExpression(parent))) {
+      const classDecorators = ts.canHaveDecorators(parent) ? ts.getDecorators(parent) : undefined;
+      if (classDecorators) {
+        return classDecorators.some(d => {
+          const name = ts.isCallExpression(d.expression) && ts.isIdentifier(d.expression.expression)
+            ? d.expression.expression.text
+            : ts.isIdentifier(d.expression) ? d.expression.text : '';
+          return name === 'Resolver';
+        });
+      }
+    }
+
+    return false;
   }
 
   /**
-   * Check if a node is inside a Promise.all(), Promise.allSettled(), Promise.race(), or Promise.any() call.
-   * Individual promises inside these don't need individual await.
+   * Check if inside Promise.all/allSettled/race/any.
    */
   private isInsidePromiseAll(node: ts.Node): boolean {
     let current = node.parent;
@@ -410,87 +611,42 @@ export class MissingAwaitDetector extends BaseEngine {
     return false;
   }
 
-  /**
-   * Check if an async function is an IIFE (Immediately Invoked Function Expression).
-   * Patterns:
-   *   (async () => { ... })()
-   *   (async function() { ... })()
-   *   (async function() { ... }).call(ctx)
-   */
   private isIIFE(funcNode: ts.Node): boolean {
     let current: ts.Node = funcNode;
-
-    // Walk up through parenthesized expressions
     while (current.parent && ts.isParenthesizedExpression(current.parent)) {
       current = current.parent;
     }
-
-    // The parent should be a CallExpression where `current` is the expression (callee)
-    if (current.parent && ts.isCallExpression(current.parent)) {
-      if (current.parent.expression === current) {
-        return true;
-      }
+    if (current.parent && ts.isCallExpression(current.parent) && current.parent.expression === current) {
+      return true;
     }
-
-    // Also handle (async () => { ... }).call(...) / .apply(...)
     if (current.parent && ts.isPropertyAccessExpression(current.parent)) {
-      const propAccess = current.parent;
-      const methodName = propAccess.name.text;
-      if ((methodName === 'call' || methodName === 'apply' || methodName === 'bind') &&
-          propAccess.parent && ts.isCallExpression(propAccess.parent)) {
+      const name = current.parent.name.text;
+      if ((name === 'call' || name === 'apply' || name === 'bind') &&
+          current.parent.parent && ts.isCallExpression(current.parent.parent)) {
         return true;
       }
     }
-
     return false;
   }
 
-  /**
-   * If `funcNode` is an argument to a CallExpression, return that CallExpression.
-   * Walks up through parenthesized expressions.
-   */
   private getEnclosingCallExpression(funcNode: ts.Node): { callExpr: ts.CallExpression } | null {
     let current: ts.Node = funcNode;
-
-    // Walk up through parenthesized expressions
     while (current.parent && ts.isParenthesizedExpression(current.parent)) {
       current = current.parent;
     }
-
-    // The parent should be a CallExpression and funcNode should be one of its arguments
     if (current.parent && ts.isCallExpression(current.parent)) {
       const callExpr = current.parent;
-      // Make sure funcNode is an argument, not the callee itself (that would be an IIFE)
       const isArgument = callExpr.arguments.some(arg => arg === current);
-      if (isArgument) {
-        return { callExpr };
-      }
+      if (isArgument) return { callExpr };
     }
-
     return null;
   }
 
-  /**
-   * Extract callee information from a CallExpression.
-   * Returns the full name, object name, and method name.
-   *
-   * Examples:
-   *   setTimeout(...)          -> { fullName: 'setTimeout', objectName: null, methodName: 'setTimeout' }
-   *   app.get(...)             -> { fullName: 'app.get', objectName: 'app', methodName: 'get' }
-   *   process.nextTick(...)    -> { fullName: 'process.nextTick', objectName: 'process', methodName: 'nextTick' }
-   *   emitter.on(...)          -> { fullName: 'emitter.on', objectName: 'emitter', methodName: 'on' }
-   */
   private getCalleeInfo(callExpr: ts.CallExpression): { fullName: string; objectName: string | null; methodName: string } | null {
     const expr = callExpr.expression;
-
     if (ts.isIdentifier(expr)) {
-      return {
-        fullName: expr.text,
-        objectName: null,
-        methodName: expr.text,
-      };
+      return { fullName: expr.text, objectName: null, methodName: expr.text };
     }
-
     if (ts.isPropertyAccessExpression(expr)) {
       const methodName = expr.name.text;
       const objectName = this.getObjectName(expr.expression);
@@ -500,73 +656,196 @@ export class MissingAwaitDetector extends BaseEngine {
         methodName,
       };
     }
-
     return null;
   }
 
+  // ──────────────────── Async Detection Strategies ────────────────────
+
   /**
-   * Check if the return value of a call expression is actually used
-   * Returns false for fire-and-forget patterns (standalone statements)
+   * S1: Check if function is declared with async keyword in the same file.
    */
-  private isReturnValueUsed(node: ts.CallExpression): boolean {
-    const parent = node.parent;
-
-    // Used in variable declaration: const x = asyncFunc()
-    if (parent && ts.isVariableDeclaration(parent)) {
-      return true;
-    }
-
-    // Used in return statement: return asyncFunc()
-    if (parent && ts.isReturnStatement(parent)) {
-      return true;
-    }
-
-    // Used in binary expression: if (asyncFunc()) or x = asyncFunc()
-    if (parent && ts.isBinaryExpression(parent)) {
-      return true;
-    }
-
-    // Used in conditional: condition ? asyncFunc() : other
-    if (parent && ts.isConditionalExpression(parent)) {
-      return true;
-    }
-
-    // Used in array literal: [asyncFunc(), other]
-    if (parent && ts.isArrayLiteralExpression(parent)) {
-      return true;
-    }
-
-    // Used in object literal: { key: asyncFunc() }
-    if (parent && ts.isPropertyAssignment(parent)) {
-      return true;
-    }
-
-    // Used as function argument: someFunc(asyncFunc())
-    if (parent && ts.isCallExpression(parent)) {
-      return true;
-    }
-
-    // Standalone statement (fire-and-forget)
-    if (parent && ts.isExpressionStatement(parent)) {
-      return false;
-    }
-
-    // Default: assume used if we can't determine
-    return true;
+  private isDeclaredAsAsync(functionName: string, context: AnalysisContext): boolean {
+    let isAsync = false;
+    traverse(context.sourceFile, (node) => {
+      if (isAsync) return;
+      if (ts.isFunctionDeclaration(node) && node.name?.text === functionName) {
+        if (ASTHelpers.isAsyncFunction(node)) isAsync = true;
+      }
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === functionName) {
+        if (node.initializer && ASTHelpers.isFunctionLike(node.initializer) && ASTHelpers.isAsyncFunction(node.initializer)) {
+          isAsync = true;
+        }
+      }
+    });
+    return isAsync;
   }
 
   /**
-   * Check if function name matches common async patterns
-   * More refined than likelyReturnsPromise for better confidence scoring
+   * S2: Check if function has Promise<T> return type annotation.
    */
-  private matchesAsyncPattern(functionName: string, objectName: string | null): boolean {
-    // Skip known synchronous patterns
-    if (this.isSyncMethod(functionName, objectName)) {
-      return false;
+  private hasPromiseReturnType(functionName: string, context: AnalysisContext): boolean {
+    let hasPromise = false;
+    traverse(context.sourceFile, (node) => {
+      if (hasPromise) return;
+      // function foo(): Promise<T> { ... }
+      if (ts.isFunctionDeclaration(node) && node.name?.text === functionName && node.type) {
+        if (this.isPromiseTypeNode(node.type)) hasPromise = true;
+      }
+      // const foo = (): Promise<T> => { ... }
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === functionName) {
+        if (node.initializer && ASTHelpers.isFunctionLike(node.initializer)) {
+          const funcLike = node.initializer as ts.FunctionLikeDeclaration;
+          if (funcLike.type && this.isPromiseTypeNode(funcLike.type)) hasPromise = true;
+        }
+      }
+      // class method: methodName(): Promise<T> { ... }
+      if (ts.isMethodDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === functionName && node.type) {
+        if (this.isPromiseTypeNode(node.type)) hasPromise = true;
+      }
+    });
+    return hasPromise;
+  }
+
+  private isPromiseTypeNode(typeNode: ts.TypeNode): boolean {
+    if (ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)) {
+      return typeNode.typeName.text === 'Promise';
+    }
+    return false;
+  }
+
+  /**
+   * S4: Check if this.methodName() calls an async method in the enclosing class.
+   * Returns isAsync flag and className.
+   */
+  private isAsyncMethodInClass(node: ts.CallExpression): { isAsync: boolean; className: string | null } {
+    const expr = node.expression;
+    if (!ts.isPropertyAccessExpression(expr)) return { isAsync: false, className: null };
+
+    const methodName = expr.name.text;
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (ts.isClassDeclaration(current) || ts.isClassExpression(current)) {
+        const name = ts.isClassDeclaration(current) && current.name ? current.name.text : null;
+        for (const member of current.members) {
+          if (ts.isMethodDeclaration(member) && member.name && ts.isIdentifier(member.name)) {
+            if (member.name.text === methodName) {
+              const isAsync = !!(member.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword));
+              return { isAsync, className: name };
+            }
+          }
+        }
+        return { isAsync: false, className: name };
+      }
+      current = current.parent;
+    }
+    return { isAsync: false, className: null };
+  }
+
+  /**
+   * S5: Naming heuristic — function name suggests I/O-bound async.
+   * Tightened to only include genuinely I/O-implying prefixes.
+   * Ambiguous prefixes like 'create', 'update', 'delete' require the next char
+   * to be uppercase (camelCase) to avoid matching words like "creation", "updating".
+   */
+  private isLikelyAsync(functionName: string): boolean {
+    const lower = functionName.toLowerCase();
+
+    // Tier 1: Strong I/O prefixes — always async
+    const strongPrefixes = ['fetch', 'load', 'save', 'query', 'request', 'upload', 'download'];
+    if (strongPrefixes.some(p => lower.startsWith(p) && functionName.length > p.length)) {
+      return true;
     }
 
-    // Strong async indicators (common async function prefixes)
-    const strongAsyncPatterns = [
+    // Tier 2: I/O-leaning but require camelCase continuation
+    const ioPrefixes = ['send', 'create', 'update', 'delete', 'find', 'remove', 'insert'];
+    for (const prefix of ioPrefixes) {
+      if (lower.startsWith(prefix) && functionName.length > prefix.length) {
+        const nextChar = functionName[prefix.length];
+        // Require uppercase next char (camelCase boundary) — e.g. "createUser" not "create"
+        if (nextChar === nextChar.toUpperCase() && nextChar !== nextChar.toLowerCase()) {
+          return true;
+        }
+      }
+    }
+
+    // Tier 3: "get" prefix — only for data-fetching patterns, not getters
+    if (lower.startsWith('get') && functionName.length > 3) {
+      const rest = functionName.slice(3);
+      // Must start with uppercase (camelCase)
+      if (rest[0] !== rest[0].toUpperCase() || rest[0] === rest[0].toLowerCase()) return false;
+      // Only match data-fetching patterns
+      const dataWords = ['User', 'Data', 'Items', 'List', 'Record', 'Result', 'Response',
+        'Config', 'Settings', 'Profile', 'Order', 'Product', 'Post', 'Comment',
+        'Message', 'File', 'Image', 'Document', 'Account', 'Payment', 'Session',
+        'Token', 'Transaction', 'Report', 'Stats', 'Analytics'];
+      if (dataWords.some(w => rest.startsWith(w))) return true;
+      if (rest.endsWith('ById') || rest.endsWith('ByEmail') || rest.endsWith('BySlug')
+          || rest.endsWith('ByName') || rest.endsWith('ByKey') || rest.endsWith('ByToken')) return true;
+      // Plural ending suggests collection fetch (getUsers, getOrders)
+      if (rest.endsWith('s') && rest.length > 2 && !rest.endsWith('ss')) return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * S6: Import from async-sounding module.
+   */
+  private isImportedFromAsyncModule(functionName: string, context: AnalysisContext): boolean {
+    const asyncModulePatterns = ['service', 'repository', 'api', 'client', 'handler'];
+    let found = false;
+    traverse(context.sourceFile, (node) => {
+      if (found) return;
+      if (ts.isImportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+        const modulePath = node.moduleSpecifier.text.toLowerCase();
+        const importClause = node.importClause;
+        if (!importClause) return;
+
+        let importsFunction = false;
+        if (importClause.name && importClause.name.text === functionName) importsFunction = true;
+        if (importClause.namedBindings && ts.isNamedImports(importClause.namedBindings)) {
+          for (const specifier of importClause.namedBindings.elements) {
+            if (specifier.name.text === functionName) { importsFunction = true; break; }
+          }
+        }
+
+        if (importsFunction && asyncModulePatterns.some(p => modulePath.includes(p))) {
+          found = true;
+        }
+      }
+    });
+    return found;
+  }
+
+  /**
+   * S7: Function used with .then()/await elsewhere in same file.
+   */
+  private isUsedAsAsyncElsewhere(functionName: string, context: AnalysisContext): boolean {
+    let found = false;
+    traverse(context.sourceFile, (node) => {
+      if (found) return;
+      if (ts.isPropertyAccessExpression(node)) {
+        const name = node.name.text;
+        if ((name === 'then' || name === 'catch') && ts.isCallExpression(node.expression)) {
+          const callee = node.expression.expression;
+          if (ts.isIdentifier(callee) && callee.text === functionName) found = true;
+        }
+      }
+      if (ts.isAwaitExpression(node) && ts.isCallExpression(node.expression)) {
+        const callee = node.expression.expression;
+        if (ts.isIdentifier(callee) && callee.text === functionName) found = true;
+      }
+    });
+    return found;
+  }
+
+  /**
+   * S8: Pattern matching for async function names.
+   */
+  private matchesAsyncPattern(functionName: string, objectName: string | null): boolean {
+    if (this.isSyncMethod(functionName, objectName)) return false;
+
+    const strongPatterns = [
       /^(fetch|load|save|update|create|delete|remove)$/i,
       /^(get|set|put|post|patch)Data$/i,
       /^send[A-Z]/,
@@ -574,373 +853,556 @@ export class MissingAwaitDetector extends BaseEngine {
       /^execute[A-Z]/,
       /^run[A-Z]/,
     ];
-
-    // Weak async indicators (could be sync or async)
-    const weakAsyncPatterns = [
+    const weakPatterns = [
       /^(get|read|write|query|insert|find|search)$/i,
     ];
 
-    // Strong pattern match
-    if (strongAsyncPatterns.some(pattern => pattern.test(functionName))) {
-      return true;
+    if (strongPatterns.some(p => p.test(functionName))) return true;
+    if (weakPatterns.some(p => p.test(functionName))) {
+      const syncGetterPatterns = [/^get\w+(Name|Type|Value|Label|Text|Key|Id|Index|Count|Length|Size)$/i];
+      if (!syncGetterPatterns.some(p => p.test(functionName))) return true;
     }
+    return false;
+  }
 
-    // Weak pattern match only if not a getter utility
-    if (weakAsyncPatterns.some(pattern => pattern.test(functionName))) {
-      // Exclude obvious sync getters
-      const syncGetterPatterns = [
-        /^get\w+(Name|Type|Value|Label|Text|Key|Id|Index|Count|Length|Size)$/i,
-      ];
-      if (!syncGetterPatterns.some(pattern => pattern.test(functionName))) {
-        return true;
+  // ──────────────────── Context Classification ────────────────────
+
+  /**
+   * Classify the block context of a call expression.
+   */
+  private classifyBlockContext(node: ts.CallExpression): BlockContext {
+    const result: BlockContext = {
+      insideTryBlock: false,
+      insideCatchBlock: false,
+      insideFinallyBlock: false,
+      insideLoop: false,
+      insideConditional: false,
+    };
+
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      // Stop at function boundary
+      if (ASTHelpers.isFunctionLike(current)) break;
+
+      if (ts.isTryStatement(current)) {
+        if (this.isDescendantOf(node, current.tryBlock)) result.insideTryBlock = true;
+        if (current.catchClause && this.isDescendantOf(node, current.catchClause)) result.insideCatchBlock = true;
+        if (current.finallyBlock && this.isDescendantOf(node, current.finallyBlock)) result.insideFinallyBlock = true;
       }
-    }
 
+      if (ts.isForStatement(current) || ts.isForInStatement(current) ||
+          ts.isForOfStatement(current) || ts.isWhileStatement(current) ||
+          ts.isDoStatement(current)) {
+        result.insideLoop = true;
+      }
+
+      if (ts.isIfStatement(current)) {
+        result.insideConditional = true;
+      }
+
+      current = current.parent;
+    }
+    return result;
+  }
+
+  private isDescendantOf(node: ts.Node, ancestor: ts.Node): boolean {
+    let current: ts.Node | undefined = node;
+    while (current) {
+      if (current === ancestor) return true;
+      current = current.parent;
+    }
     return false;
   }
 
   /**
-   * Heuristic check if call likely returns a Promise
-   * @deprecated Use matchesAsyncPattern and isDeclaredAsAsync instead
+   * Detect if unawaited call is between two awaited calls (sequence gap).
    */
-  // @ts-expect-error - Unused method kept for backward compatibility
-  private _likelyReturnsPromise(node: ts.CallExpression, context: AnalysisContext): boolean {
-    const { expression } = node;
-
-    // Get function name and object name
-    let functionName: string | null = null;
-    let objectName: string | null = null;
-
-    if (ts.isIdentifier(expression)) {
-      functionName = expression.text;
-    } else if (ts.isPropertyAccessExpression(expression)) {
-      functionName = expression.name.text;
-      objectName = this.getObjectName(expression.expression);
+  private detectSequenceGap(node: ts.CallExpression): SequenceGapInfo | null {
+    // Find the ExpressionStatement containing this call
+    let exprStmt: ts.ExpressionStatement | null = null;
+    let current: ts.Node | undefined = node;
+    while (current) {
+      if (ts.isExpressionStatement(current)) { exprStmt = current; break; }
+      if (ASTHelpers.isFunctionLike(current)) break;
+      current = current.parent;
     }
+    if (!exprStmt || !exprStmt.parent || !ts.isBlock(exprStmt.parent)) return null;
 
-    if (!functionName) {
-      return false;
-    }
+    const block = exprStmt.parent;
+    const idx = block.statements.indexOf(exprStmt);
+    if (idx === -1) return null;
 
-    // Skip intentional fire-and-forget patterns (logging, analytics, monitoring)
-    if (this.isIntentionalFireAndForget(functionName, objectName)) {
-      return false;
-    }
+    const nextStmt = idx < block.statements.length - 1 ? block.statements[idx + 1] : null;
+    const nextAwaited = nextStmt ? this.getAwaitedCallName(nextStmt) : null;
 
-    // Skip common synchronous methods
-    if (this.isSyncMethod(functionName, objectName)) {
-      return false;
-    }
-
-    // Check if function is declared as async in the same file
-    if (this.isDeclaredAsAsync(functionName, context)) {
-      return true;
-    }
-
-    // Skip known synchronous traversal functions
-    const syncTraversalFunctions = ['traverse', 'forEach', 'map', 'filter'];
-    if (syncTraversalFunctions.includes(functionName)) {
-      return false;
-    }
-
-    // Heuristic: Common async naming patterns (but only for standalone functions)
-    if (!objectName) {
-      // Skip obvious synchronous getter utilities
-      const syncGetterPatterns = [
-        /^get\w+(Name|Type|Value|Label|Text|Key|Id|Index|Count|Length|Size)$/i,
-      ];
-
-      if (syncGetterPatterns.some(pattern => pattern.test(functionName))) {
-        return false;
-      }
-
-      const asyncPatterns = [
-        /^(get|fetch|load|save|update|create|delete|send|process|execute|run|handle)/i,
-        /^(notify|track|record|write|read|query|insert)/i,
-      ];
-
-      return asyncPatterns.some(pattern => pattern.test(functionName));
-    }
-
-    return false;
-  }
-
-  /**
-   * Check if this is an intentional fire-and-forget async call
-   * (logging, analytics, background tasks that don't affect main flow)
-   */
-  private isIntentionalFireAndForget(methodName: string, objectName: string | null): boolean {
-    // Common fire-and-forget function patterns
-    const fireAndForgetPatterns = [
-      // Logging/Analytics
-      'log', 'logActivity', 'logEvent', 'logError', 'logWarning', 'logInfo',
-      'track', 'trackEvent', 'trackUser', 'trackAction', 'trackPageView',
-      'record', 'recordMetric', 'recordEvent', 'recordActivity',
-      'report', 'reportError', 'reportEvent',
-      'analytics', 'sendAnalytics',
-
-      // Event emitters (async but intentionally not awaited)
-      'emit', 'publish', 'dispatch', 'trigger', 'fire',
-
-      // Background monitoring
-      'monitor', 'ping', 'heartbeat', 'healthCheck',
-
-      // Cache warming (fire-and-forget)
-      'warmCache', 'prefetch', 'preload',
-
-      // Notifications (often fire-and-forget)
-      'notify', 'sendNotification', 'alert',
-    ];
-
-    if (fireAndForgetPatterns.includes(methodName)) {
-      return true;
-    }
-
-    // Pattern-based allowlist: log*, track*, emit*, send* (but not sendData/sendRequest)
-    if (methodName.match(/^(log|track|emit)[A-Z]/i)) {
-      return true;
-    }
-    if (methodName.match(/^send[A-Z]/) && !methodName.match(/^send(Data|Request|Message)$/i)) {
-      return true;
-    }
-
-    // Event emitter objects
-    if (objectName) {
-      const eventEmitterObjects = ['emitter', 'eventBus', 'eventEmitter', 'events', 'bus'];
-      if (eventEmitterObjects.some(obj => objectName.toLowerCase().includes(obj))) {
-        return true;
-      }
-    }
-
-    // Logger objects
-    if (objectName) {
-      const loggerObjects = ['logger', 'log', 'analytics', 'tracker', 'telemetry', 'metrics'];
-      if (loggerObjects.some(obj => objectName.toLowerCase().includes(obj))) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Check if method is known to be synchronous
-   */
-  private isSyncMethod(methodName: string, objectName: string | null): boolean {
-    // Console methods
-    if (objectName === 'console') {
-      return true;
-    }
-
-    // Chalk/Ora methods (terminal formatting)
-    const formattingObjects = ['chalk', 'ora'];
-    if (objectName && formattingObjects.includes(objectName)) {
-      return true;
-    }
-
-    // Chalk chaining (chalk.bold, chalk.red.bold, etc) - check if object name contains chalk
-    if (objectName && objectName.includes('chalk')) {
-      return true;
-    }
-
-    // Common sync string/array methods
-    const syncMethods = [
-      'push', 'pop', 'shift', 'unshift', 'slice', 'splice',
-      'toString', 'toLowerCase', 'toUpperCase', 'trim', 'split', 'join',
-      'includes', 'startsWith', 'endsWith', 'indexOf', 'match',
-      'map', 'filter', 'reduce', 'forEach', 'find', 'some', 'every',
-      'add', 'set', 'get', 'has', 'delete', 'clear',
-      'bold', 'red', 'green', 'yellow', 'blue', 'cyan', 'magenta', // chalk methods
-      'createIssue', 'loadPackageJson', 'extractPackageName', // engine helpers
-      'checkMissingAwait', 'checkResponseCall', 'checkLoggerCall', // engine checks
-      'containsStackTrace', 'containsSensitiveData', // detector helpers
-      'digest', 'update', 'createHash', // crypto methods
-      'log', 'warn', 'error', 'info', // console methods (backup)
-      'exit', 'cwd', // process methods
-      'substring', 'getDefaultBaselinePath', 'saveBaseline', 'loadBaseline', // baseline helpers
-    ];
-
-    return syncMethods.includes(methodName);
-  }
-
-  /**
-   * Get object name from expression
-   */
-  private getObjectName(expr: ts.Expression): string | null {
-    if (ts.isIdentifier(expr)) {
-      return expr.text;
-    }
-    if (ts.isPropertyAccessExpression(expr)) {
-      return this.getObjectName(expr.expression);
+    if (nextAwaited) {
+      return { nextAwaitedName: nextAwaited };
     }
     return null;
   }
 
-  /**
-   * Check if function is declared as async in the current file
-   */
-  private isDeclaredAsAsync(functionName: string, context: AnalysisContext): boolean {
-    let isAsync = false;
-
-    traverse(context.sourceFile, (node) => {
-      // Function declaration: async function foo() {}
-      if (ts.isFunctionDeclaration(node) && node.name?.text === functionName) {
-        if (ASTHelpers.isAsyncFunction(node)) {
-          isAsync = true;
-        }
-      }
-
-      // Variable with arrow function: const foo = async () => {}
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === functionName) {
-        if (node.initializer && ASTHelpers.isFunctionLike(node.initializer) && ASTHelpers.isAsyncFunction(node.initializer)) {
-          isAsync = true;
-        }
+  private getAwaitedCallName(stmt: ts.Statement): string | null {
+    let name: string | null = null;
+    traverse(stmt, (n) => {
+      if (name) return;
+      if (ts.isAwaitExpression(n) && ts.isCallExpression(n.expression)) {
+        const expr = n.expression.expression;
+        if (ts.isIdentifier(expr)) name = expr.text;
+        else if (ts.isPropertyAccessExpression(expr)) name = expr.name.text;
       }
     });
-
-    return isAsync;
+    return name;
   }
 
   /**
-   * Heuristic: Check if a function name suggests it is async based on common naming conventions.
-   * Used as a fallback when the function declaration is not found in the current file
-   * (e.g. imported from another module). Returns true for names that start with common
-   * async prefixes like fetch, load, save, etc.
+   * Detect Mongoose .exec() on a known Mongoose query.
    */
-  private isLikelyAsync(functionName: string): boolean {
-    const asyncPrefixes = ['fetch', 'get', 'load', 'save', 'create', 'update', 'delete', 'find', 'query', 'request', 'send', 'upload', 'download'];
-    const lower = functionName.toLowerCase();
-    // Check if function name starts with a common async prefix
-    // But exclude simple getters like getName, getLength (typically sync)
-    return asyncPrefixes.some(prefix => {
-      if (!lower.startsWith(prefix)) return false;
-      // 'get' prefix: only flag if followed by a "data" word (getUser, getData, getItems — not getName, getLength)
-      if (prefix === 'get') {
-        const rest = functionName.slice(3);
-        const dataWords = ['User', 'Data', 'Items', 'List', 'Record', 'Result', 'Response', 'Config', 'Settings', 'Profile', 'Order', 'Product', 'Post', 'Comment', 'Message', 'File', 'Image', 'Document'];
-        return dataWords.some(w => rest.startsWith(w)) || rest.endsWith('s') || rest.endsWith('ById') || rest.endsWith('ByEmail');
-      }
-      return true;
-    });
-  }
-
-  /**
-   * Heuristic: Check if a function is imported from a module whose file name
-   * suggests it contains async operations (service, repository, api, client, handler).
-   */
-  private isImportedFromAsyncModule(functionName: string, context: AnalysisContext): boolean {
-    const asyncModulePatterns = ['service', 'repository', 'api', 'client', 'handler'];
-    let importedFromAsyncModule = false;
-
-    traverse(context.sourceFile, (node) => {
-      if (importedFromAsyncModule) return; // Already found
-
-      if (ts.isImportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
-        const modulePath = node.moduleSpecifier.text.toLowerCase();
-
-        // Check if this import brings in the function we're looking for
-        const importClause = node.importClause;
-        if (!importClause) return;
-
-        let importsFunction = false;
-
-        // Default import: import foo from './service'
-        if (importClause.name && importClause.name.text === functionName) {
-          importsFunction = true;
-        }
-
-        // Named imports: import { foo } from './service'
-        if (importClause.namedBindings && ts.isNamedImports(importClause.namedBindings)) {
-          for (const specifier of importClause.namedBindings.elements) {
-            if (specifier.name.text === functionName) {
-              importsFunction = true;
-              break;
-            }
-          }
-        }
-
-        if (importsFunction) {
-          // Check if module path contains async-sounding keywords
-          if (asyncModulePatterns.some(pattern => modulePath.includes(pattern))) {
-            importedFromAsyncModule = true;
-          }
-        }
-      }
-    });
-
-    return importedFromAsyncModule;
-  }
-
-  /**
-   * Heuristic: Check if a function is used with .then() or await elsewhere in the same file,
-   * which strongly implies it returns a Promise and is async.
-   */
-  private isUsedAsAsyncElsewhere(functionName: string, context: AnalysisContext): boolean {
-    let usedAsAsync = false;
-
-    traverse(context.sourceFile, (node) => {
-      if (usedAsAsync) return; // Already found
-
-      // Check for: functionName(...).then(...)
-      if (ts.isPropertyAccessExpression(node)) {
-        const methodName = node.name.text;
-        if (methodName === 'then' || methodName === 'catch') {
-          // The object should be a call to functionName
-          const obj = node.expression;
-          if (ts.isCallExpression(obj)) {
-            const callee = obj.expression;
-            if (ts.isIdentifier(callee) && callee.text === functionName) {
-              usedAsAsync = true;
-            }
-          }
-        }
-      }
-
-      // Check for: await functionName(...)
-      if (ts.isAwaitExpression(node)) {
-        const awaited = node.expression;
-        if (ts.isCallExpression(awaited)) {
-          const callee = awaited.expression;
-          if (ts.isIdentifier(callee) && callee.text === functionName) {
-            usedAsAsync = true;
-          }
-        }
-      }
-    });
-
-    return usedAsAsync;
-  }
-
-  /**
-   * Check if `this.methodName()` calls an async method declared in the enclosing class.
-   */
-  private isAsyncMethodInClass(node: ts.CallExpression): boolean {
+  private isMongooseExecCall(node: ts.CallExpression): { objectName: string | null; innerMethodName: string } | null {
     const expr = node.expression;
-    if (!ts.isPropertyAccessExpression(expr)) return false;
+    if (!ts.isPropertyAccessExpression(expr)) return null;
+    if (expr.name.text !== 'exec') return null;
 
-    const methodName = expr.name.text;
+    const innerExpr = expr.expression;
+    if (!ts.isCallExpression(innerExpr)) return null;
 
-    // Walk up to find the enclosing class
-    let current: ts.Node | undefined = node.parent;
-    while (current) {
-      if (ts.isClassDeclaration(current) || ts.isClassExpression(current)) {
-        // Search class members for the method
-        for (const member of current.members) {
-          if (ts.isMethodDeclaration(member) && member.name && ts.isIdentifier(member.name)) {
-            if (member.name.text === methodName) {
-              // Check if the method has the async modifier
-              return !!(member.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword));
-            }
-          }
-        }
-        // Method not found in class — can't determine, assume sync
-        return false;
+    if (ts.isPropertyAccessExpression(innerExpr.expression)) {
+      const innerMethodName = innerExpr.expression.name.text;
+      const innerObjectName = this.getObjectName(innerExpr.expression.expression);
+      if (isKnownAsyncAPI(innerObjectName, innerMethodName)) {
+        return { objectName: innerObjectName, innerMethodName };
       }
-      current = current.parent;
+    }
+    return null;
+  }
+
+  // ──────────────────── Severity Classification ────────────────────
+
+  /**
+   * Classify severity based on context, API category, and detection confidence.
+   */
+  private classifySeverity(
+    functionName: string,
+    _objectName: string | null,
+    blockContext: BlockContext,
+    _sequenceGap: SequenceGapInfo | null,
+    returnValueUsed: boolean,
+    apiCategory: string | null,
+    isHighConfidence: boolean,
+    isCrossFileAsync: boolean,
+    node: ts.CallExpression,
+  ): { severity: 'error' | 'warning' | 'info'; confidence: 'high' | 'medium' | 'low' } {
+    // Base tier from API category
+    let tier: string;
+    if (apiCategory === 'db-write' || apiCategory === 'payment') {
+      tier = 'critical';
+    } else if (apiCategory === 'db-read' || apiCategory === 'fs' || apiCategory === 'http') {
+      tier = 'high';
+    } else if (apiCategory === 'cache' || apiCategory === 'email') {
+      tier = 'warning';
+    } else {
+      tier = isHighConfidence ? 'high' : 'warning';
     }
 
-    // Not inside a class — can't determine
+    // Escalation: try/catch or finally (broken error handling)
+    if (blockContext.insideTryBlock || blockContext.insideFinallyBlock) {
+      tier = this.escalateTier(tier);
+    }
+
+    // Escalation: return value used (Promise used as data)
+    if (returnValueUsed) {
+      tier = this.escalateTier(tier);
+    }
+
+    // Demotion: last statement in function (might be intentional)
+    if (this.isLastStatementInFunction(node)) {
+      tier = this.demoteTier(tier);
+    }
+
+    // Demotion: fire-and-forget named function
+    if (this.isFireAndForgetName(functionName)) {
+      tier = this.demoteTier(tier);
+    }
+
+    // Map tier + detection confidence to severity/confidence
+    let confidence: 'high' | 'medium' | 'low';
+    if (isHighConfidence) {
+      confidence = 'high';
+    } else if (isCrossFileAsync) {
+      confidence = 'medium';
+    } else { // pattern-match only (S8) — least reliable
+      confidence = 'low';
+    }
+
+    switch (tier) {
+      case 'critical': return { severity: 'error', confidence: 'high' };
+      case 'high': return { severity: 'error', confidence };
+      case 'warning': return { severity: 'warning', confidence };
+      case 'info': return { severity: 'info', confidence: 'low' };
+      default: return { severity: 'warning', confidence };
+    }
+  }
+
+  private escalateTier(tier: string): string {
+    const order = ['info', 'warning', 'high', 'critical'];
+    const idx = order.indexOf(tier);
+    return idx < order.length - 1 ? order[idx + 1] : tier;
+  }
+
+  private demoteTier(tier: string): string {
+    const order = ['info', 'warning', 'high', 'critical'];
+    const idx = order.indexOf(tier);
+    return idx > 0 ? order[idx - 1] : tier;
+  }
+
+  private isLastStatementInFunction(node: ts.CallExpression): boolean {
+    let exprStmt: ts.ExpressionStatement | null = null;
+    let current: ts.Node | undefined = node;
+    while (current) {
+      if (ts.isExpressionStatement(current)) { exprStmt = current; break; }
+      if (ASTHelpers.isFunctionLike(current)) break;
+      current = current.parent;
+    }
+    if (!exprStmt || !exprStmt.parent || !ts.isBlock(exprStmt.parent)) return false;
+    const block = exprStmt.parent;
+    // Only demote if there's at least one other statement before it
+    // (single-statement functions shouldn't be demoted)
+    return block.statements.length > 1 && block.statements[block.statements.length - 1] === exprStmt;
+  }
+
+  private isFireAndForgetName(functionName: string): boolean {
+    return /^(log|track|emit|notify|record|analytics)[A-Z]/i.test(functionName)
+      || MissingAwaitDetector.FIRE_AND_FORGET.has(functionName);
+  }
+
+  // ──────────────────── Contextual Suggestions ────────────────────
+
+  /**
+   * Generate context-specific message and suggestion.
+   */
+  private generateContextualSuggestion(
+    callName: string,
+    functionName: string,
+    blockContext: BlockContext,
+    sequenceGap: SequenceGapInfo | null,
+    apiCategory: string | null,
+    isHighConfidence: boolean,
+    _isCrossFileAsync: boolean,
+    returnValueUsed: boolean,
+    className: string | null,
+    storedVarName: string | null,
+  ): { message: string; suggestion: string } {
+    // try/catch context
+    if (blockContext.insideTryBlock) {
+      return {
+        message: `Async function '${callName}' called without await inside try block — catch block will not capture async rejections`,
+        suggestion: `Add 'await' before '${callName}(...)' — without await, the catch block will never execute for async errors. The Promise rejection becomes unhandled.`,
+      };
+    }
+
+    // finally block
+    if (blockContext.insideFinallyBlock) {
+      return {
+        message: `Async function '${callName}' called without await in finally block — cleanup may not complete before function returns`,
+        suggestion: `Add 'await' before '${callName}(...)' to ensure cleanup completes before the function returns.`,
+      };
+    }
+
+    // Loop
+    if (blockContext.insideLoop) {
+      return {
+        message: `Async function '${callName}' called without await in loop — operations run concurrently instead of sequentially`,
+        suggestion: `Add 'await' before '${callName}(...)' for sequential execution, or collect promises and use Promise.all() for concurrent execution.`,
+      };
+    }
+
+    // Sequence gap
+    if (sequenceGap && sequenceGap.nextAwaitedName) {
+      return {
+        message: `Async function '${callName}' called without await — '${sequenceGap.nextAwaitedName}' on next line will execute before '${callName}' completes`,
+        suggestion: `Add 'await' before '${callName}(...)' to ensure it completes before '${sequenceGap.nextAwaitedName}' runs.`,
+      };
+    }
+
+    // ORM write
+    if (apiCategory === 'db-write') {
+      return {
+        message: `Async function '${callName}' called without await — result is a Promise, not the created/updated record`,
+        suggestion: `Add 'await' before '${callName}(...)': \`const result = await ${callName}(...)\`. Without await, the database write may not complete.`,
+      };
+    }
+
+    // ORM read
+    if (apiCategory === 'db-read') {
+      return {
+        message: `Async function '${callName}' called without await — result is a Promise, not the queried data`,
+        suggestion: `Add 'await' before '${callName}(...)': \`const data = await ${callName}(...)\`. Any property access on the result will be undefined.`,
+      };
+    }
+
+    // this.method() with known class
+    if (className) {
+      return {
+        message: `Async method 'this.${functionName}' called without await — declared async in ${className}`,
+        suggestion: `Add 'await' before 'this.${functionName}(...)': \`await this.${functionName}(...)\``,
+      };
+    }
+
+    // Stored in variable but never awaited
+    if (storedVarName) {
+      return {
+        message: `Promise stored in '${storedVarName}' from '${callName}' but never awaited or handled`,
+        suggestion: `Add 'await' when using the variable: \`const ${storedVarName} = await ${callName}(...)\`, or await it later: \`await ${storedVarName}\``,
+      };
+    }
+
+    // High confidence declared async
+    if (isHighConfidence) {
+      if (returnValueUsed) {
+        return {
+          message: `Async function '${callName}' called without await`,
+          suggestion: `Add 'await' before the call: \`await ${callName}(...)\``,
+        };
+      }
+      return {
+        message: `Async function '${callName}' called without await (fire-and-forget?)`,
+        suggestion: this.generateFireAndForgetSuggestion(callName, functionName),
+      };
+    }
+
+    // Cross-file / pattern heuristic
+    if (returnValueUsed) {
+      return {
+        message: `Function '${callName}' is likely async but not awaited`,
+        suggestion: `Add 'await' before the call: \`await ${callName}(...)\``,
+      };
+    }
+    return {
+      message: `Function '${callName}' is likely async but not awaited (fire-and-forget?)`,
+      suggestion: this.generateFireAndForgetSuggestion(callName, functionName),
+    };
+  }
+
+  // ──────────────────── Helpers ────────────────────
+
+  private isIntentionalFireAndForget(methodName: string, objectName: string | null): boolean {
+    if (MissingAwaitDetector.FIRE_AND_FORGET.has(methodName)) return true;
+
+    if (/^(log|track|emit)[A-Z]/i.test(methodName)) return true;
+    if (/^send[A-Z]/.test(methodName) && !/^send(Data|Request|Message)$/i.test(methodName)) return true;
+
+    if (objectName) {
+      const eventObjects = ['emitter', 'eventBus', 'eventEmitter', 'events', 'bus'];
+      if (eventObjects.some(obj => objectName.toLowerCase().includes(obj))) return true;
+
+      const loggerObjects = ['logger', 'log', 'analytics', 'tracker', 'telemetry', 'metrics'];
+      if (loggerObjects.some(obj => objectName.toLowerCase().includes(obj))) return true;
+    }
+
     return false;
   }
 
+  private isSyncMethod(methodName: string, objectName: string | null): boolean {
+    // Known async API check — bypass sync list for ORM/Redis/etc.
+    if (isKnownAsyncAPI(objectName, methodName)) return false;
+
+    // For well-known objects with complete API definitions, if a method ISN'T listed
+    // in the async set, it's definitively sync (e.g., fs.createReadStream is sync).
+    // Only apply this closed-world assumption to authoritative, well-defined APIs.
+    if (objectName) {
+      const AUTHORITATIVE_OBJECTS = ['fs', 'fsPromises', 'bcrypt', 'sharp', 'axios', 'got', 'superagent'];
+      if (AUTHORITATIVE_OBJECTS.includes(objectName)) {
+        const knownMethods = KNOWN_ASYNC_METHODS.get(objectName);
+        if (knownMethods && !knownMethods.has(methodName)) return true;
+      }
+    }
+
+    // Explicit sync objects (console, Math, lodash, moment, etc.)
+    if (objectName && (SYNC_OBJECTS.has(objectName) || objectName.includes('chalk'))) {
+      return true;
+    }
+
+    // Pattern-based sync object detection (Utils, Helper, Builder, Formatter, etc.)
+    if (objectName && matchesSyncObjectPattern(objectName)) {
+      return true;
+    }
+
+    return SYNC_METHODS.has(methodName);
+  }
+
+  private isReturnValueUsed(node: ts.CallExpression): boolean {
+    let current: ts.Node = node;
+
+    while (current.parent) {
+      const parent = current.parent;
+
+      // Transparent wrappers — keep walking up
+      if (ts.isParenthesizedExpression(parent) ||
+          ts.isAsExpression(parent) ||
+          ts.isNonNullExpression(parent)) {
+        current = parent;
+        continue;
+      }
+
+      // Ternary — value flows through
+      if (ts.isConditionalExpression(parent) &&
+          (current === parent.whenTrue || current === parent.whenFalse)) {
+        current = parent;
+        continue;
+      }
+
+      // Logical operators (&&, ||, ??) — value flows through
+      if (ts.isBinaryExpression(parent) &&
+          (parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+           parent.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+           parent.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken)) {
+        current = parent;
+        continue;
+      }
+
+      // Comma operator — only right side flows
+      if (ts.isBinaryExpression(parent) &&
+          parent.operatorToken.kind === ts.SyntaxKind.CommaToken &&
+          current === parent.right) {
+        current = parent;
+        continue;
+      }
+
+      // Terminal nodes
+      if (ts.isExpressionStatement(parent)) return false;
+      if (ts.isReturnStatement(parent)) return true;
+      if (ts.isVariableDeclaration(parent)) return true;
+      if (ts.isArrayLiteralExpression(parent)) return true;
+      if (ts.isPropertyAssignment(parent)) return true;
+      if (ts.isCallExpression(parent)) return true;
+      if (ts.isBinaryExpression(parent)) return true;
+
+      // Arrow function implicit return
+      if (ts.isArrowFunction(parent) && !ts.isBlock(parent.body) && current === parent.body) {
+        return true;
+      }
+
+      return true; // Default: assume used (conservative)
+    }
+
+    return true;
+  }
+
+  /**
+   * Forward scan: check if a variable assigned from a call is later used
+   * with synchronous property access (.length, .name, [0], mathematical ops),
+   * proving the developer knows the result is a concrete value, not a Promise.
+   */
+  private isResultUsedSynchronously(varName: string, assignmentNode: ts.Node): boolean {
+    const enclosingFunc = this.findEnclosingAsyncFunction(assignmentNode);
+    if (!enclosingFunc) return false;
+
+    const body = 'body' in enclosingFunc ? enclosingFunc.body : null;
+    if (!body) return false;
+
+    let found = false;
+    let pastAssignment = false;
+
+    traverse(body, (n) => {
+      if (found) return;
+      if (n === assignmentNode) { pastAssignment = true; return; }
+      if (!pastAssignment) return;
+
+      // variable.property (sync property access — e.g., result.length, result.name)
+      if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.expression) &&
+          n.expression.text === varName) {
+        const prop = n.name.text;
+        // Skip .then/.catch/.finally — those are promise handling, not sync access
+        if (prop === 'then' || prop === 'catch' || prop === 'finally') return;
+        found = true;
+        return;
+      }
+
+      // variable[index] — bracket access (e.g., result[0])
+      if (ts.isElementAccessExpression(n) && ts.isIdentifier(n.expression) &&
+          n.expression.text === varName) {
+        found = true;
+        return;
+      }
+
+      // typeof variable, !variable (unary ops on the variable)
+      if (ts.isPrefixUnaryExpression(n) && ts.isIdentifier(n.operand) &&
+          n.operand.text === varName) {
+        found = true;
+        return;
+      }
+
+      // variable + x, variable === x (arithmetic/comparison — not assignment)
+      if (ts.isBinaryExpression(n)) {
+        const op = n.operatorToken.kind;
+        if (op !== ts.SyntaxKind.EqualsToken &&
+            op !== ts.SyntaxKind.AmpersandAmpersandToken &&
+            op !== ts.SyntaxKind.BarBarToken &&
+            op !== ts.SyntaxKind.QuestionQuestionToken) {
+          if ((ts.isIdentifier(n.left) && n.left.text === varName) ||
+              (ts.isIdentifier(n.right) && n.right.text === varName)) {
+            found = true;
+            return;
+          }
+        }
+      }
+
+      // `${variable}` in template literal
+      if (ts.isTemplateSpan(n)) {
+        const expr = n.expression;
+        if (ts.isIdentifier(expr) && expr.text === varName) {
+          found = true;
+          return;
+        }
+      }
+
+      // Destructuring: const { a } = variable (re-destructuring)
+      if (ts.isVariableDeclaration(n) && n.initializer &&
+          ts.isIdentifier(n.initializer) && n.initializer.text === varName) {
+        if (ts.isObjectBindingPattern(n.name) || ts.isArrayBindingPattern(n.name)) {
+          found = true;
+          return;
+        }
+      }
+
+      // for...of variable (iterating — proves it's iterable, not a promise)
+      if (ts.isForOfStatement(n) && ts.isIdentifier(n.expression) &&
+          n.expression.text === varName) {
+        // Skip for-await-of — that handles promises
+        if (!n.awaitModifier) {
+          found = true;
+          return;
+        }
+      }
+    });
+
+    return found;
+  }
+
+  /**
+   * Generate context-aware suggestion for intentional fire-and-forget patterns.
+   */
+  private generateFireAndForgetSuggestion(callName: string, functionName: string): string {
+    // Detect common fire-and-forget patterns
+    const lower = functionName.toLowerCase();
+
+    if (/^(log|track|record|report|emit|publish|dispatch|notify|monitor|ping)/.test(lower)) {
+      return `If '${callName}' is intentionally fire-and-forget (telemetry/logging), add \`void ${callName}(...)\` to suppress. If it must complete, use \`await ${callName}(...)\`.`;
+    }
+
+    if (/^(cache|warm|prefetch|preload|invalidate|refresh|sync|flush)/.test(lower)) {
+      return `If '${callName}' is a background cache/sync operation, use \`void ${callName}(...)\`. If the result is needed before continuing, use \`await ${callName}(...)\`.`;
+    }
+
+    if (/^(cleanup|close|disconnect|destroy|shutdown|dispose|release)/.test(lower)) {
+      return `If '${callName}' is cleanup that must complete, use \`await ${callName}(...)\`. If best-effort cleanup is acceptable, use \`void ${callName}(...)\`.`;
+    }
+
+    return `If this must complete before continuing, use: \`await ${callName}(...)\`. If intentionally fire-and-forget, add \`void ${callName}(...)\` to make intent explicit.`;
+  }
+
+  private getObjectName(expr: ts.Expression): string | null {
+    if (ts.isIdentifier(expr)) return expr.text;
+    if (ts.isPropertyAccessExpression(expr)) return expr.name.text;
+    return null;
+  }
 }
