@@ -4859,3 +4859,516 @@ describe('IDOR Comprehensive - NestJS Decorators', () => {
     assert.strictEqual(issues.length, 0, 'Should skip with @Authorize decorator');
   });
 });
+
+// ─── Missing Await: Return Statement Skip ─────────────────────────────────────
+
+describe('Missing Await - Return Statement Skip', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should skip missing-await when this.method() is directly returned', async () => {
+    const code = `
+      class MyService {
+        async fetchData(): Promise<any> { return {}; }
+        async process(): Promise<any> {
+          return this.fetchData();
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Returned this.method() should not be flagged');
+  });
+
+  test('should skip missing-await when this.method() returned through object argument', async () => {
+    const code = `
+      class TransactionService {
+        async persistTransactionDetails(repo: any, data: any): Promise<any> { return {}; }
+        async process(): Promise<any> {
+          const repo = {};
+          return this.persistTransactionDetails(repo, {
+            amount: '100',
+            currency: 'USD',
+            type: 'DEBIT',
+            metadata: { source: 'webhook' },
+          });
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Returned this.method() with object arg should not be flagged');
+  });
+
+  test('should skip missing-await for this.method() arrow implicit return', async () => {
+    const code = `
+      class QuoteProvider {
+        async fetchQuoteFromProvider(req: any): Promise<any> { return {}; }
+        getQuote = async (req: any): Promise<any> => this.fetchQuoteFromProvider(req);
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Arrow implicit return of this.method() should not be flagged');
+  });
+
+  test('should skip missing-await when this.method() returned through ternary', async () => {
+    const code = `
+      class Service {
+        async createZeroFeeResponse(): Promise<any> { return {}; }
+        async calculateFee(amount: number): Promise<any> { return {}; }
+        async process(amount: number): Promise<any> {
+          return amount === 0 ? this.createZeroFeeResponse() : this.calculateFee(amount);
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Ternary-returned this.method() calls should not be flagged');
+  });
+
+  test('should still flag unawaited async this.method() that is NOT returned', async () => {
+    const code = `
+      class PayrollService {
+        async confirmBatchPayment(id: string): Promise<void> { }
+        async process(id: string): Promise<void> {
+          if (true) {
+            this.confirmBatchPayment(id);
+          }
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 1, 'Non-returned fire-and-forget should still be flagged');
+  });
+});
+
+// ─── Missing Await: BigNumber / Sync Object as ORM False Positive ─────────────
+
+describe('Missing Await - Sync Object ORM False Positive', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should not flag BigNumber.min as missing await', async () => {
+    const code = `
+      import BigNumber from 'bignumber.js';
+      async function calculate() {
+        const a = new BigNumber(100);
+        const b = new BigNumber(200);
+        const result = BigNumber.min(a, b);
+        return result.toString();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'BigNumber.min() is sync, not an ORM call');
+  });
+
+  test('should not flag Decimal.max as missing await', async () => {
+    const code = `
+      import { Decimal } from 'decimal.js';
+      async function compare() {
+        const x = new Decimal('1.5');
+        const y = new Decimal('2.5');
+        const bigger = Decimal.max(x, y);
+        return bigger;
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Decimal.max() is sync, not an ORM call');
+  });
+
+  test('should still flag real ORM PascalCase calls', async () => {
+    const code = `
+      async function processUser() {
+        User.findOne({ where: { id: 1 } });
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 1, 'User.findOne() should still be flagged as ORM');
+  });
+});
+
+// ─── Missing Await: Sync Prefix Veto with Cross-File Async ────────────────────
+
+describe('Missing Await - Sync Prefix Veto Override', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should not flag convert* function imported from service module', async () => {
+    const code = `
+      import { convertFromSmallestCurrencyUnit } from '@/services/fuseManagement/fuse';
+      async function process() {
+        try {
+          const amount = convertFromSmallestCurrencyUnit(rawAmount).toString();
+          return amount;
+        } catch (e) {
+          throw e;
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'convert* prefix should veto even with service module import');
+  });
+
+  test('should not flag format* function from service directory', async () => {
+    const code = `
+      import { formatCurrency } from '@/services/payment/utils';
+      async function display() {
+        const label = formatCurrency(1000, 'USD');
+        return label;
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'format* prefix should veto heuristic async');
+  });
+
+  test('should still flag sync-prefixed function if used with await elsewhere', async () => {
+    const code = `
+      import { convertData } from './dataService';
+      async function process() {
+        const result = await convertData(input);
+        return result;
+      }
+      async function other() {
+        convertData(otherInput);
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 1, 'Should flag if await evidence overrides sync prefix');
+  });
+});
+
+// ─── Missing Await: Module Path Heuristic Tightening ──────────────────────────
+
+describe('Missing Await - Module Path Heuristic', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should not match directory name "services" for utility function', async () => {
+    const code = `
+      import { calculateFee } from '@/services/feeUtils';
+      async function process() {
+        const fee = calculateFee(100);
+        return fee;
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Utility from services dir should not be flagged by module heuristic');
+  });
+
+  test('should match module filename ending with Service', async () => {
+    const code = `
+      import { processPayment } from './paymentService';
+      async function handle() {
+        processPayment(orderId);
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'Function from *Service module should be flagged');
+  });
+});
+
+// ──────────────────── Round 3: Immediate Chain + High Confidence ────────────────────
+
+describe('Missing Await - Immediate Chain vs High Confidence', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should flag async fetchData().toString() (S1 high confidence — .toString() on Promise is a bug)', async () => {
+    const code = `
+      async function fetchData() { return 'data'; }
+      async function handler() {
+        const s = fetchData().toString();
+        return s;
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'Declared async fn().toString() should be flagged — .toString() on Promise returns "[object Promise]"');
+  });
+
+  test('should flag async fetchData().length (S1 high confidence — .length on Promise is undefined)', async () => {
+    const code = `
+      async function fetchData() { return [1,2,3]; }
+      async function handler() {
+        const len = fetchData().length;
+        return len;
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'Declared async fn().length should be flagged');
+  });
+
+  test('should NOT flag heuristic-only getData().toString() (low confidence + chain proves sync)', async () => {
+    const code = `
+      async function handler() {
+        const s = convertAmount(100).toString();
+        return s;
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Heuristic-only fn().toString() should be vetoed by chain');
+  });
+
+  test('should NOT flag heuristic getData() + 1 (low confidence + arithmetic proves sync)', async () => {
+    const code = `
+      async function handler() {
+        const x = computeTotal() + 1;
+        return x;
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Arithmetic on heuristic-only result should be vetoed');
+  });
+});
+
+// ──────────────────── Round 3: Property Assignment Detection ────────────────────
+
+describe('Missing Await - Property Assignment Detection', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should flag { result: fetchData() } where fetchData is declared async', async () => {
+    const code = `
+      async function fetchData() { return { name: 'test' }; }
+      async function handler() {
+        const obj = { result: fetchData() };
+        return obj;
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'Promise stored in object literal should be flagged');
+  });
+
+  test('should flag [fetchData()] in array where fetchData is declared async', async () => {
+    const code = `
+      async function fetchData() { return { name: 'test' }; }
+      async function handler() {
+        const arr = [fetchData()];
+        return arr;
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'Promise stored in array literal should be flagged');
+  });
+});
+
+// ──────────────────── Round 3: Variable Handling Tightened ────────────────────
+
+describe('Missing Await - Variable Handling Precision', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should flag const x = fetchData(); processData(x) — passing to unknown function is NOT handling', async () => {
+    const code = `
+      async function fetchData() { return 42; }
+      async function handler() {
+        const x = fetchData();
+        processData(x);
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'Passing promise to unknown function should not auto-skip');
+  });
+
+  test('should NOT flag const x = fetchData(); await x — awaited later', async () => {
+    const code = `
+      async function fetchData() { return 42; }
+      async function handler() {
+        const x = fetchData();
+        const result = await x;
+        return result;
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Variable awaited later should not be flagged');
+  });
+
+  test('should NOT flag const x = fetchData(); return x — returned later', async () => {
+    const code = `
+      async function fetchData() { return 42; }
+      async function handler() {
+        const x = fetchData();
+        return x;
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Variable returned later should not be flagged');
+  });
+});
+
+// ──────────────────── Round 3: S7 Confidence Downgrade ────────────────────
+
+describe('Missing Await - S7 Confidence Level', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should assign LOW confidence for S7-only detection (used as async elsewhere)', async () => {
+    const code = `
+      async function handler1() {
+        doWork();
+      }
+      async function handler2() {
+        await doWork();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    if (issues.length > 0) {
+      assert.strictEqual(issues[0].confidence, 'low', 'S7-only detection should be low confidence');
+    }
+  });
+
+  test('should assign MEDIUM confidence for S5+S7 combined (naming + used as async)', async () => {
+    const code = `
+      async function handler1() {
+        fetchUserData();
+      }
+      async function handler2() {
+        await fetchUserData();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'fetchUserData should be flagged');
+    assert.strictEqual(issues[0].confidence, 'medium', 'S5+S7 should be medium confidence');
+  });
+});
+
+// ──────────────────── Round 3: load* camelCase Boundary ────────────────────
+
+describe('Missing Await - Load Prefix CamelCase', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should flag loadUserData() as likely async (camelCase boundary)', async () => {
+    const code = `
+      async function handler() {
+        loadUserData();
+      }
+      async function otherHandler() {
+        await loadUserData();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'loadUserData should be flagged (load + CamelCase)');
+  });
+
+  test('should NOT flag loadash() without camelCase boundary', async () => {
+    const code = `
+      async function handler() {
+        loadash(data);
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'loadash should not match load* prefix (no camelCase boundary)');
+  });
+});
+
+// ──────────────────── Round 3: Modern JS Patterns ────────────────────
+
+describe('Missing Await - Modern JS Patterns', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should NOT flag fetchData().catch(err => {}) as missing await (promise chain)', async () => {
+    const code = `
+      async function fetchData() { return 42; }
+      async function handler() {
+        fetchData().catch(err => console.error(err));
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Promise with .catch() handler should not be flagged');
+  });
+
+  test('should NOT flag fetchData().then(x => x) as missing await (promise chain)', async () => {
+    const code = `
+      async function fetchData() { return 42; }
+      async function handler() {
+        fetchData().then(x => process(x));
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Promise with .then() handler should not be flagged');
+  });
+
+  test('should NOT flag void fetchData() (explicit discard)', async () => {
+    const code = `
+      async function fetchData() { return 42; }
+      async function handler() {
+        void fetchData();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'void prefix marks explicit fire-and-forget');
+  });
+
+  test('should flag nested async function call without await', async () => {
+    const code = `
+      async function outer() {
+        async function inner() { return 42; }
+        inner();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'Nested async function called without await should be flagged');
+  });
+
+  test('should flag unawaited call inside catch block', async () => {
+    const code = `
+      async function saveError(err: any) { return; }
+      async function handler() {
+        try {
+          await doWork();
+        } catch (err) {
+          saveError(err);
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'Unawaited async call in catch block should be flagged');
+  });
+});
+
+// ──────────────────── Round 3: Stripe Sub-Objects ────────────────────
+
+describe('Missing Await - Stripe Extended API', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should flag stripe.refunds.create() as missing await', async () => {
+    const code = `
+      async function handler() {
+        refunds.create({ charge: 'ch_123' });
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'refunds.create should be flagged as known async API');
+  });
+
+  test('should flag stripe.invoices.pay() as missing await', async () => {
+    const code = `
+      async function handler() {
+        invoices.pay('inv_123');
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'invoices.pay should be flagged as known async API');
+  });
+});

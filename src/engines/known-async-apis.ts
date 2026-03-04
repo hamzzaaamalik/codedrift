@@ -4,6 +4,8 @@
  * Used by MissingAwaitDetector for high-confidence detection.
  */
 
+import { SYNC_OBJECTS } from './known-sync-apis.js';
+
 // ──────────────────── Method Databases ────────────────────
 
 /** ORM query methods (shared across Sequelize, Mongoose, Prisma, TypeORM) */
@@ -28,8 +30,9 @@ const ORM_WRITE_METHODS = new Set([
 /** All ORM methods combined */
 const ORM_ALL_METHODS = new Set([...ORM_READ_METHODS, ...ORM_WRITE_METHODS, 'exec']);
 
-/** JS built-in constructors — never ORM models */
+/** JS built-in constructors and common non-ORM PascalCase classes — never ORM models */
 const JS_BUILTINS = new Set([
+  // JS/Node built-ins
   'Array', 'Map', 'Set', 'Object', 'String', 'Number', 'Boolean',
   'RegExp', 'Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError',
   'Date', 'Math', 'JSON', 'Promise', 'Symbol', 'Proxy', 'Reflect',
@@ -37,6 +40,21 @@ const JS_BUILTINS = new Set([
   'Float64Array', 'ArrayBuffer', 'SharedArrayBuffer', 'DataView',
   'Intl', 'URL', 'URLSearchParams', 'AbortController', 'AbortSignal',
   'TextEncoder', 'TextDecoder', 'FormData', 'Headers', 'Request', 'Response',
+
+  // Math/BigNumber libraries (PascalCase but NOT ORM models)
+  'BigNumber', 'Decimal', 'BN', 'Big', 'Fraction', 'Complex',
+
+  // Date/time libraries
+  'Duration', 'DateTime', 'Moment', 'Interval',
+
+  // Node.js internals
+  'EventEmitter', 'Stream', 'Transform', 'Readable', 'Writable',
+  'Duplex', 'PassThrough', 'Socket', 'Server', 'Console',
+
+  // Common non-ORM PascalCase classes (sync operations)
+  'Scheduler', 'Pipeline', 'Container', 'Registry', 'Queue',
+  'Stack', 'Counter', 'Timer', 'Iterator', 'Observer',
+  'Emitter', 'Logger', 'Cache', 'Pool', 'Channel',
 ]);
 
 /** Maps exact object names to their async method sets */
@@ -93,6 +111,10 @@ export const KNOWN_ASYNC_METHODS = new Map<string, Set<string>>([
   ['charges', new Set(['create', 'retrieve', 'update', 'list', 'capture'])],
   ['paymentIntents', new Set(['create', 'retrieve', 'update', 'confirm', 'cancel', 'list'])],
   ['subscriptions', new Set(['create', 'retrieve', 'update', 'del', 'list'])],
+  ['refunds', new Set(['create', 'retrieve', 'update', 'list'])],
+  ['transfers', new Set(['create', 'retrieve', 'update', 'list'])],
+  ['disputes', new Set(['retrieve', 'update', 'list', 'close'])],
+  ['invoices', new Set(['create', 'retrieve', 'update', 'del', 'list', 'pay', 'sendInvoice', 'voidInvoice', 'finalizeInvoice'])],
 
   // ── Node.js streams (promisified) ──
   ['stream', new Set(['pipeline', 'finished'])],
@@ -145,6 +167,7 @@ const CACHE_SET = new Set([
 /** Payment objects */
 const PAYMENT_OBJECTS = new Set([
   'customers', 'charges', 'paymentIntents', 'subscriptions',
+  'refunds', 'transfers', 'disputes', 'invoices',
 ]);
 
 // ──────────────────── Lookup Functions ────────────────────
@@ -158,6 +181,9 @@ export function isKnownAsyncAPI(objectName: string | null, methodName: string): 
   if (!objectName) {
     return KNOWN_ASYNC_STANDALONE.has(methodName);
   }
+
+  // Known sync objects — never async (BigNumber, Decimal, moment, lodash, etc.)
+  if (SYNC_OBJECTS.has(objectName)) return false;
 
   // Exact match in the known methods map
   const methods = KNOWN_ASYNC_METHODS.get(objectName);

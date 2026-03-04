@@ -124,10 +124,6 @@ export class MissingAwaitDetector extends BaseEngine {
     // 3. Promise chain (.then/.catch/.finally)
     if (this.hasPromiseHandler(node)) return null;
 
-    // 3.5 Immediate chain — developer treats return as sync value
-    //     e.g., fn().toString(), fn().length, !fn(), fn() + 1, `${fn()}`, ...fn()
-    if (this.hasImmediateChain(node)) return null;
-
     // 4. Callback-style call (last arg is (err, data) => ...)
     if (this.isCallbackStyleCall(node)) return null;
 
@@ -217,11 +213,38 @@ export class MissingAwaitDetector extends BaseEngine {
     const isLikelyAsync = isHighConfidence || isCrossFileAsync || matchesPattern;
     if (!isLikelyAsync) return null;
 
-    // ── Sync prefix veto (pattern-match only — no cross-file evidence) ──
-    if (!isHighConfidence && !isCrossFileAsync && functionName && matchesSyncPrefix(functionName)) {
-      if (!isKnownAsyncAPI(objectName, functionName)) {
+    // ── Sync prefix veto — function names starting with convert*, format*, parse*, etc.
+    //    Applies even with cross-file async (module path heuristic is weak evidence),
+    //    BUT not if the function is used with await/then elsewhere (S7 — strong evidence).
+    if (!isHighConfidence && functionName && matchesSyncPrefix(functionName)) {
+      if (!isKnownAsyncAPI(objectName, functionName) && !isUsedAsAsync) {
         return null;
       }
+    }
+
+    // ── Immediate chain veto — fn().toString(), fn().length, !fn(), fn() + 1, etc.
+    //    Only for non-high-confidence: if fn IS declared async (S1-S4), chaining
+    //    .toString() on a Promise is a real bug (returns "[object Promise]").
+    //    For heuristic detections, the chain proves the developer thinks it's sync.
+    if (!isHighConfidence && this.hasImmediateChain(node)) {
+      return null;
+    }
+
+    // ── Return statement skip for this.method() class forwarding.
+    //    When a class method does `return this.otherMethod(...)`, the Promise
+    //    flows to the caller — this is intentional delegation, not fire-and-forget.
+    //    Only applies to this.* calls (knownAsync via S4), not bare function calls.
+    if (knownAsync && this.isReturned(node)) {
+      return null;
+    }
+
+    // ── Destructuring veto — const { a } = fn() proves developer expects sync object.
+    //    Only for non-high-confidence: if fn IS declared async (S1-S4), destructuring
+    //    a Promise is a real bug (data will be undefined).
+    if (!isHighConfidence && node.parent && ts.isVariableDeclaration(node.parent) &&
+        node.parent.initializer === node &&
+        (ts.isObjectBindingPattern(node.parent.name) || ts.isArrayBindingPattern(node.parent.name))) {
+      return null;
     }
 
     // ── Sync usage veto — variable used synchronously later (non-high confidence only) ──
@@ -256,7 +279,8 @@ export class MissingAwaitDetector extends BaseEngine {
     // ── Severity ──
     const { severity, confidence } = this.classifySeverity(
       functionName || '', objectName, blockContext, sequenceGap,
-      returnValueUsed, effectiveApiCategory, isHighConfidence, isCrossFileAsync, node,
+      returnValueUsed, effectiveApiCategory, isHighConfidence,
+      isHeuristicallyAsync, isFromAsyncModule, isUsedAsAsync, node,
     );
 
     // ── Suggestion ──
@@ -282,8 +306,10 @@ export class MissingAwaitDetector extends BaseEngine {
     while (current.parent) {
       const p = current.parent;
       if (ts.isAwaitExpression(p) || ts.isVoidExpression(p)) return true;
-      // Chain continues through property access, call expressions, and parenthesized exprs
-      if (ts.isCallExpression(p) || ts.isParenthesizedExpression(p)) {
+      // Chain continues through property access, call expressions, parenthesized exprs,
+      // type assertions, and non-null assertions
+      if (ts.isCallExpression(p) || ts.isParenthesizedExpression(p) ||
+          ts.isNonNullExpression(p) || ts.isAsExpression(p) || ts.isTypeAssertionExpression(p)) {
         current = p;
         continue;
       }
@@ -356,10 +382,10 @@ export class MissingAwaitDetector extends BaseEngine {
     // ...fn() spread
     if (ts.isSpreadElement(parent) && parent.expression === node) return true;
 
-    // const { a, b } = fn() — destructuring
-    if (ts.isVariableDeclaration(parent) && parent.initializer === node) {
-      if (ts.isObjectBindingPattern(parent.name) || ts.isArrayBindingPattern(parent.name)) return true;
-    }
+    // NOTE: destructuring `const { a } = fn()` is NOT skipped here.
+    // If fn is high-confidence async (S1-S4), destructuring a Promise IS a bug
+    // (data will be undefined). For heuristic detections, isResultUsedSynchronously
+    // handles the veto post-detection.
 
     return false;
   }
@@ -395,9 +421,6 @@ export class MissingAwaitDetector extends BaseEngine {
         ts.isIdentifier(parent.left)) {
       return { name: parent.left.text, node: parent };
     }
-    if (parent && ts.isPropertyAssignment(parent)) {
-      return { name: '__property__', node: parent }; // treated as handled
-    }
     return null;
   }
 
@@ -406,9 +429,6 @@ export class MissingAwaitDetector extends BaseEngine {
    * is later awaited, returned, .then()-chained, or passed to Promise.all.
    */
   private isVariableHandledLater(varName: string, assignmentNode: ts.Node, _callNode: ts.CallExpression): boolean {
-    // Property assignment is always considered handled
-    if (varName === '__property__') return true;
-
     const enclosingFunc = this.findEnclosingAsyncFunction(assignmentNode);
     if (!enclosingFunc) return true; // Conservative: assume handled
 
@@ -453,18 +473,6 @@ export class MissingAwaitDetector extends BaseEngine {
         }
       }
 
-      // Variable passed as function argument (excluding sync/logging functions)
-      if (ts.isCallExpression(n)) {
-        const calledName = ts.isPropertyAccessExpression(n.expression)
-          ? this.getObjectName(n.expression.expression)
-          : ts.isIdentifier(n.expression) ? n.expression.text : null;
-        const isSyncCaller = calledName && SYNC_OBJECTS.has(calledName);
-        if (!isSyncCaller) {
-          for (const arg of n.arguments) {
-            if (ts.isIdentifier(arg) && arg.text === varName) { found = true; return; }
-          }
-        }
-      }
     });
 
     return found;
@@ -482,6 +490,64 @@ export class MissingAwaitDetector extends BaseEngine {
       }
       current = current.parent;
     }
+    return false;
+  }
+
+  /**
+   * Check if a call expression is inside a return statement or arrow implicit return.
+   * Walks up the AST through transparent wrappers (parens, type assertions, ternaries,
+   * logical operators, object/array literals) and stops at statement-level nodes.
+   */
+  private isReturned(node: ts.CallExpression): boolean {
+    let current: ts.Node = node;
+
+    while (current.parent) {
+      const parent = current.parent;
+
+      // Found return — call IS returned
+      if (ts.isReturnStatement(parent)) return true;
+
+      // Arrow function implicit return: () => fn()
+      if (ts.isArrowFunction(parent) && !ts.isBlock(parent.body) && current === parent.body) {
+        return true;
+      }
+
+      // Yield / yield*
+      if (ts.isYieldExpression(parent)) return true;
+
+      // ── Transparent wrappers — keep walking ──
+      if (ts.isParenthesizedExpression(parent)) { current = parent; continue; }
+      if (ts.isAsExpression(parent) || ts.isTypeAssertionExpression(parent)) { current = parent; continue; }
+      if (ts.isNonNullExpression(parent)) { current = parent; continue; }
+      if (ts.isConditionalExpression(parent)) { current = parent; continue; }
+
+      // Logical operators: fn() ?? fallback, a || fn()
+      if (ts.isBinaryExpression(parent) && [
+        ts.SyntaxKind.QuestionQuestionToken,
+        ts.SyntaxKind.BarBarToken,
+        ts.SyntaxKind.AmpersandAmpersandToken,
+        ts.SyntaxKind.CommaToken,
+      ].includes(parent.operatorToken.kind)) {
+        current = parent;
+        continue;
+      }
+
+      // ── Statement-level nodes — stop walking ──
+      if (ts.isExpressionStatement(parent)) return false;
+      if (ts.isVariableDeclaration(parent)) return false;
+      if (ts.isIfStatement(parent)) return false;
+      if (ts.isBlock(parent)) return false;
+      if (ts.isForStatement(parent)) return false;
+      if (ts.isForOfStatement(parent)) return false;
+      if (ts.isForInStatement(parent)) return false;
+      if (ts.isWhileStatement(parent)) return false;
+      if (ts.isSwitchStatement(parent)) return false;
+
+      // Everything else — keep walking (ObjectLiteral, ArrayLiteral,
+      // PropertyAssignment, SpreadElement, CallExpression args, etc.)
+      current = parent;
+    }
+
     return false;
   }
 
@@ -726,19 +792,67 @@ export class MissingAwaitDetector extends BaseEngine {
     while (current) {
       if (ts.isClassDeclaration(current) || ts.isClassExpression(current)) {
         const name = ts.isClassDeclaration(current) && current.name ? current.name.text : null;
-        for (const member of current.members) {
-          if (ts.isMethodDeclaration(member) && member.name && ts.isIdentifier(member.name)) {
-            if (member.name.text === methodName) {
-              const isAsync = !!(member.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword));
-              return { isAsync, className: name };
-            }
-          }
-        }
+        const result = this.findAsyncMemberInClass(current, methodName);
+        if (result !== null) return { isAsync: result, className: name };
+
+        // Check parent class in same file (single-level inheritance)
+        const parentResult = this.findAsyncMemberInParentClass(current, methodName);
+        if (parentResult !== null) return { isAsync: parentResult, className: name };
+
         return { isAsync: false, className: name };
       }
       current = current.parent;
     }
     return { isAsync: false, className: null };
+  }
+
+  /** Check if a class has a member (method or arrow property) with the given name. */
+  private findAsyncMemberInClass(classNode: ts.ClassDeclaration | ts.ClassExpression, methodName: string): boolean | null {
+    for (const member of classNode.members) {
+      // Standard method: async method() {}
+      if (ts.isMethodDeclaration(member) && member.name && ts.isIdentifier(member.name)) {
+        if (member.name.text === methodName) {
+          return !!(member.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword));
+        }
+      }
+      // Arrow function property: method = async () => {}
+      if (ts.isPropertyDeclaration(member) && member.name && ts.isIdentifier(member.name)) {
+        if (member.name.text === methodName && member.initializer) {
+          if (ASTHelpers.isFunctionLike(member.initializer) && ASTHelpers.isAsyncFunction(member.initializer)) {
+            return true;
+          }
+          if (ASTHelpers.isFunctionLike(member.initializer)) {
+            return false; // Found the property but it's not async
+          }
+        }
+      }
+    }
+    return null; // Not found in this class
+  }
+
+  /** Walk the extends clause to find the parent class in the same file and check its members. */
+  private findAsyncMemberInParentClass(classNode: ts.ClassDeclaration | ts.ClassExpression, methodName: string): boolean | null {
+    if (!classNode.heritageClauses) return null;
+    for (const clause of classNode.heritageClauses) {
+      if (clause.token !== ts.SyntaxKind.ExtendsKeyword) continue;
+      for (const type of clause.types) {
+        if (!ts.isIdentifier(type.expression)) continue;
+        const parentName = type.expression.text;
+        // Find parent class in same file
+        const sourceFile = classNode.getSourceFile();
+        let parentClass: ts.ClassDeclaration | ts.ClassExpression | null = null;
+        traverse(sourceFile, (n) => {
+          if (parentClass) return;
+          if (ts.isClassDeclaration(n) && n.name?.text === parentName) {
+            parentClass = n;
+          }
+        });
+        if (parentClass) {
+          return this.findAsyncMemberInClass(parentClass, methodName);
+        }
+      }
+    }
+    return null;
   }
 
   /**
@@ -751,13 +865,13 @@ export class MissingAwaitDetector extends BaseEngine {
     const lower = functionName.toLowerCase();
 
     // Tier 1: Strong I/O prefixes — always async
-    const strongPrefixes = ['fetch', 'load', 'save', 'query', 'request', 'upload', 'download'];
+    const strongPrefixes = ['fetch', 'save', 'query', 'request', 'upload', 'download'];
     if (strongPrefixes.some(p => lower.startsWith(p) && functionName.length > p.length)) {
       return true;
     }
 
     // Tier 2: I/O-leaning but require camelCase continuation
-    const ioPrefixes = ['send', 'create', 'update', 'delete', 'find', 'remove', 'insert'];
+    const ioPrefixes = ['send', 'load', 'create', 'update', 'delete', 'find', 'remove', 'insert'];
     for (const prefix of ioPrefixes) {
       if (lower.startsWith(prefix) && functionName.length > prefix.length) {
         const nextChar = functionName[prefix.length];
@@ -790,14 +904,16 @@ export class MissingAwaitDetector extends BaseEngine {
 
   /**
    * S6: Import from async-sounding module.
+   * Only matches if the MODULE FILENAME itself suggests async (not parent directories).
+   * e.g., import from './transactionService' matches, but './services/utils/fuse' does not.
    */
   private isImportedFromAsyncModule(functionName: string, context: AnalysisContext): boolean {
-    const asyncModulePatterns = ['service', 'repository', 'api', 'client', 'handler'];
+    const asyncModulePatterns = [/service$/i, /repository$/i, /repo$/i, /api$/i, /client$/i, /handler$/i];
     let found = false;
     traverse(context.sourceFile, (node) => {
       if (found) return;
       if (ts.isImportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
-        const modulePath = node.moduleSpecifier.text.toLowerCase();
+        const modulePath = node.moduleSpecifier.text;
         const importClause = node.importClause;
         if (!importClause) return;
 
@@ -809,8 +925,12 @@ export class MissingAwaitDetector extends BaseEngine {
           }
         }
 
-        if (importsFunction && asyncModulePatterns.some(p => modulePath.includes(p))) {
-          found = true;
+        if (importsFunction) {
+          // Match against the last path segment (module filename), not directories
+          const lastSegment = modulePath.split('/').pop() || '';
+          if (asyncModulePatterns.some(p => p.test(lastSegment))) {
+            found = true;
+          }
         }
       }
     });
@@ -988,7 +1108,9 @@ export class MissingAwaitDetector extends BaseEngine {
     returnValueUsed: boolean,
     apiCategory: string | null,
     isHighConfidence: boolean,
-    isCrossFileAsync: boolean,
+    isHeuristicallyAsync: boolean,
+    isFromAsyncModule: boolean,
+    isUsedAsAsync: boolean,
     node: ts.CallExpression,
   ): { severity: 'error' | 'warning' | 'info'; confidence: 'high' | 'medium' | 'low' } {
     // Base tier from API category
@@ -1023,13 +1145,23 @@ export class MissingAwaitDetector extends BaseEngine {
       tier = this.demoteTier(tier);
     }
 
+    // Floor: db-write and payment operations should never drop below 'high'
+    if ((apiCategory === 'db-write' || apiCategory === 'payment') && (tier === 'warning' || tier === 'info')) {
+      tier = 'high';
+    }
+
     // Map tier + detection confidence to severity/confidence
+    // S5 (naming heuristic) or S6 (module import) → medium confidence
+    // S7 alone (used as async elsewhere) → low (weak evidence: no scope checking)
+    // S8 (pattern match only) → low
     let confidence: 'high' | 'medium' | 'low';
     if (isHighConfidence) {
       confidence = 'high';
-    } else if (isCrossFileAsync) {
+    } else if (isHeuristicallyAsync || isFromAsyncModule) {
       confidence = 'medium';
-    } else { // pattern-match only (S8) — least reliable
+    } else if (isUsedAsAsync) {
+      confidence = 'low';
+    } else {
       confidence = 'low';
     }
 
@@ -1070,7 +1202,7 @@ export class MissingAwaitDetector extends BaseEngine {
   }
 
   private isFireAndForgetName(functionName: string): boolean {
-    return /^(log|track|emit|notify|record|analytics)[A-Z]/i.test(functionName)
+    return /^(log|track|emit|notify|record|analytics|report|publish|dispatch|trigger|fire)[A-Z]/i.test(functionName)
       || MissingAwaitDetector.FIRE_AND_FORGET.has(functionName);
   }
 
@@ -1188,14 +1320,21 @@ export class MissingAwaitDetector extends BaseEngine {
     if (MissingAwaitDetector.FIRE_AND_FORGET.has(methodName)) return true;
 
     if (/^(log|track|emit)[A-Z]/i.test(methodName)) return true;
-    if (/^send[A-Z]/.test(methodName) && !/^send(Data|Request|Message)$/i.test(methodName)) return true;
+    // send* is fire-and-forget ONLY for notifications/events, NOT for data/payment/email
+    if (/^send[A-Z]/.test(methodName) &&
+        !/^send(Data|Request|Message|Email|Payment|File|Batch|Response|Transaction)$/i.test(methodName)) {
+      return true;
+    }
 
     if (objectName) {
-      const eventObjects = ['emitter', 'eventBus', 'eventEmitter', 'events', 'bus'];
-      if (eventObjects.some(obj => objectName.toLowerCase().includes(obj))) return true;
+      const lower = objectName.toLowerCase();
+      // Use exact match or suffix/word-boundary check to avoid substring false matches
+      // (e.g., "analogService" should NOT match "log")
+      const eventObjects = ['emitter', 'eventbus', 'eventemitter', 'events'];
+      if (eventObjects.some(obj => lower === obj || lower.endsWith(obj))) return true;
 
-      const loggerObjects = ['logger', 'log', 'analytics', 'tracker', 'telemetry', 'metrics'];
-      if (loggerObjects.some(obj => objectName.toLowerCase().includes(obj))) return true;
+      const loggerObjects = ['logger', 'analytics', 'tracker', 'telemetry', 'metrics'];
+      if (loggerObjects.some(obj => lower === obj || lower.endsWith(obj))) return true;
     }
 
     return false;
@@ -1217,7 +1356,7 @@ export class MissingAwaitDetector extends BaseEngine {
     }
 
     // Explicit sync objects (console, Math, lodash, moment, etc.)
-    if (objectName && (SYNC_OBJECTS.has(objectName) || objectName.includes('chalk'))) {
+    if (objectName && (SYNC_OBJECTS.has(objectName) || objectName === 'chalk')) {
       return true;
     }
 

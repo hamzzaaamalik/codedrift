@@ -161,7 +161,7 @@ export const SYNC_METHODS = new Set([
   'optional', 'nullable', 'required', 'default', 'describe', 'label',
   'min', 'max', 'length', 'email', 'url', 'uuid', 'regex', 'refine',
   'shape', 'extend', 'merge', 'pick', 'omit', 'partial', 'strict', 'passthrough',
-  'safeParse', 'parseAsync',
+  'safeParse',
   // ── Immutable.js ──
   'toJS', 'toJSON', 'toArray', 'toObject', 'toMap', 'toList', 'toSet',
   'getIn', 'setIn', 'updateIn', 'deleteIn', 'mergeIn', 'mergeDeepIn',
@@ -207,8 +207,8 @@ const SYNC_PREFIXES = [
   'compare', 'diff', 'equals', 'match', 'matches',
   // ── Conversion prefixes ──
   'to', 'from', 'into', 'as',
-  // ── Encoding ──
-  'encode', 'decode', 'compress', 'decompress', 'encrypt', 'decrypt', 'hash',
+  // ── Encoding (note: encrypt/decrypt/hash removed — commonly async wrappers) ──
+  'encode', 'decode', 'compress', 'decompress',
   // ── Functional ──
   'map', 'reduce', 'filter', 'sort', 'order', 'rank',
   // ── Rendering (in-memory) ──
