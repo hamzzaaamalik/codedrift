@@ -138,7 +138,7 @@ describe('MissingAwaitDetector', () => {
     const code = `
       async function fetchData() { return {}; }
       async function handler() {
-        return fetchData(); // Missing await - return value used
+        fetchData(); // Missing await - fire-and-forget
       }
     `;
     const context = createContext(code);
@@ -148,7 +148,7 @@ describe('MissingAwaitDetector', () => {
     const issue = issues[0];
     assert.ok(issue, 'Issue should exist');
     assert.ok(issue.confidence, 'Should have confidence field');
-    assert.strictEqual(issue.confidence, 'high', 'Should have high confidence when return value is used');
+    assert.strictEqual(issue.confidence, 'high', 'Should have high confidence for declared async');
   });
 
   test('should not flag properly awaited calls', async () => {
@@ -684,7 +684,7 @@ describe('MissingAwaitDetector - Framework context skips', () => {
     const code = `
       async function fetchData() { return {}; }
       async function handler() {
-        return fetchData();
+        fetchData();
       }
     `;
     const context = createContext(code);
@@ -1884,6 +1884,75 @@ describe('UnsafeRegexDetector - False Positive Filters', () => {
     const issues = await engine.analyze(context);
     assert.ok(issues.length > 0, 'Should still flag the ReDoS pattern');
     assert.strictEqual(issues[0].severity, 'warning', 'Should demote to warning for split iteration');
+  });
+});
+
+// ─── Unsafe Regex: Disjoint-Delimiter Guard ──────────────────────────────────
+
+describe('UnsafeRegexDetector - Disjoint-Delimiter Guard', () => {
+  const engine = new UnsafeRegexDetector();
+
+  test('should NOT flag /^\\d+(\\.\\d+)?$/ (version pattern — \\. disjoint from \\d)', async () => {
+    const code = String.raw`const version = /^\d+(\.\d+)?$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Delimiter \\. is disjoint from \\d — safe pattern');
+  });
+
+  test('should NOT flag /^[a-z0-9]+(-[a-z0-9]+)*$/ (slug pattern — - disjoint from [a-z0-9])', async () => {
+    const code = String.raw`const slug = /^[a-z0-9]+(-[a-z0-9]+)*$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Delimiter - is disjoint from [a-z0-9] — safe pattern');
+  });
+
+  test('should NOT flag /^\\w+(\\s\\w+)*$/ (space-separated words — \\s disjoint from \\w)', async () => {
+    const code = String.raw`const words = /^\w+(\s\w+)*$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Delimiter \\s is disjoint from \\w — safe pattern');
+  });
+
+  test('should NOT flag /^[a-z]+(_[a-z]+)*$/ (snake_case — _ disjoint from [a-z])', async () => {
+    const code = String.raw`const snake = /^[a-z]+(_[a-z]+)*$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Delimiter _ is disjoint from [a-z] — safe pattern');
+  });
+
+  test('should NOT flag /^\\w+(\\.\\w+)*@\\w+(\\.\\w+)+$/ (email-like — \\. disjoint from \\w)', async () => {
+    const code = String.raw`const email = /^\w+(\.\w+)*@\w+(\.\w+)+$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Delimiter \\. is disjoint from \\w — safe pattern');
+  });
+
+  test('should still flag /(a+)+$/ (no delimiter — truly unsafe)', async () => {
+    const code = `const bad = /(a+)+$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'No delimiter between nested quantifiers — genuinely unsafe');
+  });
+
+  test('should still flag /(\\w+)+/ (no delimiter — overlapping nested quantifier)', async () => {
+    const code = String.raw`const bad = /(\w+)+/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'No delimiter — \\w inside quantified group overlaps with outer');
+  });
+
+  test('should NOT flag /^\\d{1,3}(\\.\\d{1,3}){3}$/ (IP-like — \\. disjoint from \\d)', async () => {
+    const code = String.raw`const ip = /^\d{1,3}(\.\d{1,3}){3}$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Delimiter \\. is disjoint from \\d — safe pattern');
+  });
+
+  test('should NOT flag /^[a-zA-Z]+([._-][a-zA-Z]+)*$/ (bracket-expression delimiter)', async () => {
+    const code = String.raw`const identifier = /^[a-zA-Z]+([._-][a-zA-Z]+)*$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Bracket-expression delimiter [._-] is disjoint from [a-zA-Z]');
   });
 });
 

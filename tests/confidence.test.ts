@@ -65,7 +65,7 @@ describe('Confidence Levels - Basic Assignment', () => {
     const code = `
       async function fetchData() { return {}; }
       async function handler() {
-        return fetchData(); // Missing await - return value used in return statement
+        fetchData(); // Missing await - fire-and-forget
       }
     `;
     const context = createContext(code, 'src/api.ts');
@@ -74,8 +74,8 @@ describe('Confidence Levels - Basic Assignment', () => {
     assert.ok(issues.length > 0, 'Should detect missing await');
     const issue = issues[0];
     assert.ok(issue, 'Issue should exist');
-    // High confidence when function is declared async and return value is used
-    assert.strictEqual(issue.confidence, 'high', 'Should have high confidence when return value is used');
+    // High confidence when function is declared async in same file
+    assert.strictEqual(issue.confidence, 'high', 'Should have high confidence for declared async');
   });
 });
 
@@ -106,7 +106,7 @@ describe('Confidence Levels - Test File Downgrade', () => {
     const code = `
       async function fetchData() { return {}; }
       async function handler() {
-        return fetchData(); // Missing await - return value used in return statement
+        fetchData(); // Missing await - fire-and-forget
       }
     `;
     const context = createContext(code, 'src/__tests__/api.ts');
@@ -198,7 +198,7 @@ describe('Confidence Levels - Metadata', () => {
     const code = `
       async function fetchData() { return {}; }
       async function handler() {
-        return fetchData(); // Return value used
+        fetchData(); // Missing await - fire-and-forget
       }
     `;
     const context = createContext(code, 'src/api.test.ts');
@@ -362,7 +362,7 @@ describe('Confidence Levels - Edge Cases', () => {
     const code = `
       async function fetchData() { return {}; }
       async function handler() {
-        return fetchData(); // Return value used
+        fetchData(); // Missing await - fire-and-forget
       }
     `;
     // File is both in dist/ and a test file

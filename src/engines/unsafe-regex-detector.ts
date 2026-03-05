@@ -145,17 +145,23 @@ export class UnsafeRegexDetector extends BaseEngine {
     const isSafe = safeRegex(pattern);
 
     if (!isSafe) {
-      const severity = this.getStaticReDoSSeverity(node, context);
-      return this.createIssue(
-        context,
-        node,
-        'Unsafe regex pattern — vulnerable to ReDoS (Regular Expression Denial of Service)',
-        {
-          severity,
-          suggestion: `Rewrite this regex to avoid nested quantifiers like (a+)+, (a*)*, or (a+)*. ${severity === 'error' ? 'This regex is used in a context that processes user input — fix immediately.' : 'If this regex processes untrusted user input, this is a critical security issue.'}`,
-          confidence: 'high',
-        }
-      );
+      // Disjoint-delimiter guard: patterns like \d+(\.\d+)? are safe because
+      // the delimiter (\.) prevents catastrophic backtracking even though
+      // safe-regex2 flags the nested quantifier. Skip if every quantified group
+      // starts with a delimiter disjoint from the preceding character class.
+      if (!this.hasDisjointDelimiters(pattern)) {
+        const severity = this.getStaticReDoSSeverity(node, context);
+        return this.createIssue(
+          context,
+          node,
+          'Unsafe regex pattern — vulnerable to ReDoS (Regular Expression Denial of Service)',
+          {
+            severity,
+            suggestion: `Rewrite this regex to avoid nested quantifiers like (a+)+, (a*)*, or (a+)*. ${severity === 'error' ? 'This regex is used in a context that processes user input — fix immediately.' : 'If this regex processes untrusted user input, this is a critical security issue.'}`,
+            confidence: 'high',
+          }
+        );
+      }
     }
 
     // Supplementary: overlapping alternation with quantifier
@@ -866,6 +872,303 @@ export class UnsafeRegexDetector extends BaseEngine {
       current = current.parent;
     }
     return false;
+  }
+
+  // ──────────── Disjoint-Delimiter Guard ────────────
+
+  /**
+   * Check if every quantified group in the pattern starts with a delimiter
+   * character disjoint from the preceding character class. If so, safe-regex2's
+   * nested-quantifier concern is a false alarm — the delimiter prevents
+   * catastrophic backtracking.
+   *
+   * Handles literal delimiters (-, _, \.), escape-class delimiters (\s, \d),
+   * and bracket-expression delimiters ([._-]).
+   *
+   * Examples of safe patterns:
+   *   /^\d+(\.\d+)?$/           — \. disjoint from \d
+   *   /^[a-z0-9]+(-[a-z0-9]+)*$/ — - disjoint from [a-z0-9]
+   *   /^\w+(\s\w+)*$/           — \s disjoint from \w
+   */
+  private hasDisjointDelimiters(pattern: string): boolean {
+    const groups = this.findQuantifiedGroups(pattern);
+    if (groups.length === 0) return false;
+
+    for (const group of groups) {
+      const firstElem = this.extractFirstRegexElement(group.content);
+      if (!firstElem) return false;
+
+      const precElem = this.extractPrecedingRegexElement(pattern, group.startIndex);
+      if (!precElem) return false;
+
+      if (!this.elementsAreDisjoint(firstElem, precElem)) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Find all top-level quantified groups: (...)+, (...)*, (...)?
+   * Returns content (without parens) and start index of each.
+   */
+  private findQuantifiedGroups(pattern: string): Array<{ content: string; startIndex: number }> {
+    const groups: Array<{ content: string; startIndex: number }> = [];
+    let i = 0;
+
+    while (i < pattern.length) {
+      if (pattern[i] === '\\' && i + 1 < pattern.length) { i += 2; continue; }
+
+      // Skip character class [...]
+      if (pattern[i] === '[') {
+        i = this.skipCharClass(pattern, i);
+        continue;
+      }
+
+      // Found opening paren — find matching close
+      if (pattern[i] === '(') {
+        const start = i;
+        let depth = 1;
+        i++;
+
+        while (i < pattern.length && depth > 0) {
+          if (pattern[i] === '\\' && i + 1 < pattern.length) { i += 2; continue; }
+          if (pattern[i] === '[') { i = this.skipCharClass(pattern, i); continue; }
+          if (pattern[i] === '(') depth++;
+          if (pattern[i] === ')') depth--;
+          i++;
+        }
+
+        // i is past the closing ). Check if followed by quantifier.
+        if (i < pattern.length && /[+*?{]/.test(pattern[i])) {
+          let content = pattern.substring(start + 1, i - 1);
+          // Strip non-capturing/named group prefix
+          if (content.startsWith('?:')) content = content.substring(2);
+          else if (content.startsWith('?<') && content.includes('>')) {
+            content = content.substring(content.indexOf('>') + 1);
+          }
+          groups.push({ content, startIndex: start });
+        }
+        continue;
+      }
+
+      i++;
+    }
+    return groups;
+  }
+
+  /**
+   * Extract the first regex element from a group's content string.
+   * Returns \d, \., [a-z], or a literal character.
+   */
+  private extractFirstRegexElement(content: string): string | null {
+    if (!content || content.length === 0) return null;
+
+    // Escape sequence: \d, \w, \s, \., etc.
+    if (content[0] === '\\' && content.length >= 2) {
+      return content.substring(0, 2);
+    }
+
+    // Character class: [...]
+    if (content[0] === '[') {
+      const end = this.findClosingBracket(content, 0);
+      if (end === -1) return null;
+      return content.substring(0, end + 1);
+    }
+
+    // Literal character
+    return content[0];
+  }
+
+  /**
+   * Extract the regex element immediately before position `pos` in the pattern.
+   * Strips trailing quantifiers (+, *, ?, {n,m}) to get the base element.
+   */
+  private extractPrecedingRegexElement(pattern: string, pos: number): string | null {
+    if (pos <= 0) return null;
+
+    let p = pos - 1;
+
+    // Strip quantifiers and modifiers from right
+    while (p >= 0) {
+      if (pattern[p] === '+' || pattern[p] === '*' || pattern[p] === '?') {
+        p--;
+      } else if (pattern[p] === '}') {
+        const braceStart = pattern.lastIndexOf('{', p);
+        if (braceStart >= 0) { p = braceStart - 1; } else { break; }
+      } else {
+        break;
+      }
+    }
+
+    if (p < 0) return null;
+
+    // Skip anchors — not matchable characters
+    if (pattern[p] === '^' || pattern[p] === '$') return null;
+
+    // Character class: ]...[
+    if (pattern[p] === ']') {
+      let j = p - 1;
+      while (j >= 0) {
+        if (pattern[j] === '[' && (j === 0 || pattern[j - 1] !== '\\')) {
+          return pattern.substring(j, p + 1);
+        }
+        if (pattern[j] === '\\' && j > 0) { j -= 2; continue; }
+        j--;
+      }
+      return null;
+    }
+
+    // Closing group: ) — preceding element is a group (walk through it)
+    if (pattern[p] === ')') {
+      let depth = 1;
+      let j = p - 1;
+      while (j >= 0 && depth > 0) {
+        if (pattern[j] === ')') depth++;
+        else if (pattern[j] === '(') depth--;
+        j--;
+      }
+      return (depth === 0) ? pattern.substring(j + 1, p + 1) : null;
+    }
+
+    // Escape sequence: \d, \w, etc.
+    if (p >= 1 && pattern[p - 1] === '\\') {
+      return pattern.substring(p - 1, p + 1);
+    }
+
+    // Literal character
+    return pattern[p];
+  }
+
+  /**
+   * Check if two regex elements are disjoint (cannot match any common character).
+   * Uses character category classification.
+   */
+  private elementsAreDisjoint(a: string, b: string): boolean {
+    const aCats = this.getCharCategories(a);
+    const bCats = this.getCharCategories(b);
+    if (!aCats || !bCats) return false;
+    if (aCats.has('any') || bCats.has('any')) return false;
+
+    for (const cat of aCats) {
+      if (bCats.has(cat)) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Map a regex element to the set of character categories it can match.
+   * Categories: digit, lower, upper, underscore, whitespace, punct, any
+   */
+  private getCharCategories(element: string): Set<string> | null {
+    const cats = new Set<string>();
+
+    // Escape classes
+    if (element === '\\d') { cats.add('digit'); return cats; }
+    if (element === '\\D') { ['lower', 'upper', 'underscore', 'whitespace', 'punct'].forEach(c => cats.add(c)); return cats; }
+    if (element === '\\w') { ['digit', 'lower', 'upper', 'underscore'].forEach(c => cats.add(c)); return cats; }
+    if (element === '\\W') { ['whitespace', 'punct'].forEach(c => cats.add(c)); return cats; }
+    if (element === '\\s') { cats.add('whitespace'); return cats; }
+    if (element === '\\S') { ['digit', 'lower', 'upper', 'underscore', 'punct'].forEach(c => cats.add(c)); return cats; }
+
+    // Escaped literal: \., \-, \_, etc.
+    if (element.startsWith('\\') && element.length === 2) {
+      this.classifyChar(element[1], cats);
+      return cats;
+    }
+
+    // Character class: [...]
+    if (element.startsWith('[') && element.endsWith(']')) {
+      const inner = element.slice(1, -1);
+      const negated = inner.startsWith('^');
+      const content = negated ? inner.slice(1) : inner;
+
+      const positiveCats = new Set<string>();
+      this.parseCharClassContent(content, positiveCats);
+
+      if (negated) {
+        const all = ['digit', 'lower', 'upper', 'underscore', 'whitespace', 'punct'];
+        for (const c of all) { if (!positiveCats.has(c)) cats.add(c); }
+        return cats.size > 0 ? cats : null;
+      }
+      return positiveCats.size > 0 ? positiveCats : null;
+    }
+
+    // Unescaped dot — matches (almost) anything
+    if (element === '.') { cats.add('any'); return cats; }
+
+    // Literal single character
+    if (element.length === 1) {
+      this.classifyChar(element, cats);
+      return cats;
+    }
+
+    return null;
+  }
+
+  /** Classify a single character into digit/lower/upper/underscore/whitespace/punct */
+  private classifyChar(ch: string, cats: Set<string>): void {
+    if (/[0-9]/.test(ch)) cats.add('digit');
+    else if (/[a-z]/.test(ch)) cats.add('lower');
+    else if (/[A-Z]/.test(ch)) cats.add('upper');
+    else if (ch === '_') cats.add('underscore');
+    else if (/\s/.test(ch)) cats.add('whitespace');
+    else cats.add('punct');
+  }
+
+  /** Parse the content of a character class [...] and add categories */
+  private parseCharClassContent(content: string, cats: Set<string>): void {
+    let i = 0;
+    while (i < content.length) {
+      // Escape sequence inside class
+      if (content[i] === '\\' && i + 1 < content.length) {
+        const esc = content[i + 1];
+        if (esc === 'd') cats.add('digit');
+        else if (esc === 'w') { ['digit', 'lower', 'upper', 'underscore'].forEach(c => cats.add(c)); }
+        else if (esc === 's') cats.add('whitespace');
+        else this.classifyChar(esc, cats);
+        i += 2;
+        continue;
+      }
+
+      // Range: a-z, 0-9, A-Z
+      if (i + 2 < content.length && content[i + 1] === '-' && content[i + 2] !== ']') {
+        const start = content[i], end = content[i + 2];
+        if (/[a-z]/.test(start) && /[a-z]/.test(end)) cats.add('lower');
+        else if (/[A-Z]/.test(start) && /[A-Z]/.test(end)) cats.add('upper');
+        else if (/[0-9]/.test(start) && /[0-9]/.test(end)) cats.add('digit');
+        i += 3;
+        continue;
+      }
+
+      // Single character
+      this.classifyChar(content[i], cats);
+      i++;
+    }
+  }
+
+  /** Skip past a character class [...], returning the index after the closing ] */
+  private skipCharClass(pattern: string, start: number): number {
+    let i = start + 1;
+    if (i < pattern.length && pattern[i] === '^') i++;
+    if (i < pattern.length && pattern[i] === ']') i++; // ] as first char is literal
+    while (i < pattern.length) {
+      if (pattern[i] === '\\' && i + 1 < pattern.length) { i += 2; continue; }
+      if (pattern[i] === ']') return i + 1;
+      i++;
+    }
+    return i;
+  }
+
+  /** Find the index of the closing ] for a character class starting at `start` */
+  private findClosingBracket(pattern: string, start: number): number {
+    let i = start + 1;
+    if (i < pattern.length && pattern[i] === '^') i++;
+    if (i < pattern.length && pattern[i] === ']') i++;
+    while (i < pattern.length) {
+      if (pattern[i] === '\\' && i + 1 < pattern.length) { i += 2; continue; }
+      if (pattern[i] === ']') return i;
+      i++;
+    }
+    return -1;
   }
 
   // ──────────── Utility ────────────

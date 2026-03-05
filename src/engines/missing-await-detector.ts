@@ -230,11 +230,11 @@ export class MissingAwaitDetector extends BaseEngine {
       return null;
     }
 
-    // ── Return statement skip for this.method() class forwarding.
-    //    When a class method does `return this.otherMethod(...)`, the Promise
-    //    flows to the caller — this is intentional delegation, not fire-and-forget.
-    //    Only applies to this.* calls (knownAsync via S4), not bare function calls.
-    if (knownAsync && this.isReturned(node)) {
+    // ── Return statement skip — `return asyncCall()` forwards the Promise to the caller.
+    //    This is not fire-and-forget: the caller receives and can await the Promise.
+    //    Applies to ALL returned async calls: return this.method(), return Model.findOne(),
+    //    return fetchData(), return fetchQuoteFromProvider(), etc.
+    if (this.isReturned(node)) {
       return null;
     }
 
@@ -532,20 +532,12 @@ export class MissingAwaitDetector extends BaseEngine {
         continue;
       }
 
-      // ── Statement-level nodes — stop walking ──
-      if (ts.isExpressionStatement(parent)) return false;
-      if (ts.isVariableDeclaration(parent)) return false;
-      if (ts.isIfStatement(parent)) return false;
-      if (ts.isBlock(parent)) return false;
-      if (ts.isForStatement(parent)) return false;
-      if (ts.isForOfStatement(parent)) return false;
-      if (ts.isForInStatement(parent)) return false;
-      if (ts.isWhileStatement(parent)) return false;
-      if (ts.isSwitchStatement(parent)) return false;
-
-      // Everything else — keep walking (ObjectLiteral, ArrayLiteral,
-      // PropertyAssignment, SpreadElement, CallExpression args, etc.)
-      current = parent;
+      // ── Everything else — stop walking ──
+      // The Promise is only forwarded when it's a DIRECT return value.
+      // When embedded in object literals ({ result: fn() }), arrays ([fn()]),
+      // function arguments (someCall(fn())), or spread (...fn()), the Promise
+      // is buried — the caller gets { result: Promise } not { result: data }.
+      return false;
     }
 
     return false;
