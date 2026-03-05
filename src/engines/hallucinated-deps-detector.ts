@@ -34,6 +34,12 @@ export class HallucinatedDepsDetector extends BaseEngine {
     const imports = getImports(context.sourceFile);
 
     for (const imp of imports) {
+      // Skip type-only imports: `import type { ... } from 'module'`
+      // These are erased at compile time and never cause runtime errors
+      if (imp.isTypeOnly) {
+        continue;
+      }
+
       const packageName = extractPackageName(imp.moduleName);
 
       // Skip relative/absolute imports
@@ -136,6 +142,34 @@ export class HallucinatedDepsDetector extends BaseEngine {
               !(context.pathAliases && isTsConfigAlias(moduleName, context.pathAliases)) &&
               !isNodeBuiltin(packageName) &&
               !exists) {
+
+            // Skip optional dependencies in try-catch blocks or .catch() chains
+            let isOptional = false;
+            let ancestor: ts.Node | undefined = node.parent;
+            while (ancestor && !ts.isSourceFile(ancestor)) {
+              if (ts.isTryStatement(ancestor) || ts.isCatchClause(ancestor)) {
+                isOptional = true;
+                break;
+              }
+              ancestor = ancestor.parent;
+            }
+            // Also check .catch() chain: import('x').catch(...)
+            if (node.parent && ts.isPropertyAccessExpression(node.parent) &&
+                node.parent.name.text === 'catch') {
+              isOptional = true;
+            }
+            // For awaited imports inside try: await import('x')
+            if (node.parent && ts.isAwaitExpression(node.parent)) {
+              let awaitAncestor: ts.Node | undefined = node.parent.parent;
+              while (awaitAncestor && !ts.isSourceFile(awaitAncestor)) {
+                if (ts.isTryStatement(awaitAncestor) || ts.isCatchClause(awaitAncestor)) {
+                  isOptional = true;
+                  break;
+                }
+                awaitAncestor = awaitAncestor.parent;
+              }
+            }
+            if (isOptional) return; // Skip — this is an optional dependency
 
             // Check for typosquat
             const typosquatCheck = checkTyposquat(packageName);

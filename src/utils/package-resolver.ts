@@ -39,6 +39,7 @@ export class PackageResolver implements IPackageResolver {
   private workspaces: WorkspaceInfo[] = [];
   private workspacesLoaded = false;
   private workspaceNameCache: Map<string, string | undefined> = new Map();
+  private lockedPackages: Set<string> | null = null;
 
   /**
    * Create a new PackageResolver
@@ -221,8 +222,31 @@ export class PackageResolver implements IPackageResolver {
       }
     }
 
-    // Finally, check root package.json
-    return this.hasAnyDependency(name);
+    // Check root package.json
+    if (this.hasAnyDependency(name)) {
+      return true;
+    }
+
+    // Check all workspace package.jsons — in a monorepo, packages declared in any
+    // workspace are hoisted to the root node_modules and available to all packages.
+    // This handles the common pattern where a shared dep lives in one workspace
+    // (e.g., @codebuff/internal has drizzle-orm) but other workspaces import it.
+    for (const workspace of this.workspaces) {
+      if (this.isInDependencies(name, workspace.packageJson)) {
+        return true;
+      }
+    }
+
+    // Check lockfile — transitive deps are locked and available at runtime even if not
+    // explicitly declared in any package.json. Covers bun.lock, package-lock.json,
+    // yarn.lock, and pnpm-lock.yaml.
+    if (this.isInLockfile(name)) {
+      return true;
+    }
+
+    // Final fallback: check if installed in node_modules (handles linked workspace
+    // packages, bundler-resolved deps, and nested workspace patterns not covered above)
+    return this.existsInNodeModules(name, filePath);
   }
 
   /**
@@ -380,6 +404,123 @@ export class PackageResolver implements IPackageResolver {
     }
 
     return resolved;
+  }
+
+  /**
+   * Check if a package is present in the project's lockfile.
+   * Transitive dependencies are locked even if not explicitly declared in package.json.
+   * Supports bun.lock, package-lock.json, yarn.lock, and pnpm-lock.yaml.
+   */
+  private isInLockfile(name: string): boolean {
+    if (this.lockedPackages === null) {
+      this.lockedPackages = this.loadLockfile();
+    }
+    return this.lockedPackages.has(name);
+  }
+
+  /**
+   * Load and parse the project lockfile to extract all locked package names.
+   * Returns a Set of package names that are locked (directly or transitively).
+   */
+  private loadLockfile(): Set<string> {
+    const rootDir = path.dirname(this.packageJsonPath);
+    const locked = new Set<string>();
+
+    // bun.lock — JSONC format (trailing commas). Package entries are lines like:
+    //     "package-name": ["package-name@version", ...],
+    const bunLockPath = path.join(rootDir, 'bun.lock');
+    if (fs.existsSync(bunLockPath)) {
+      try {
+        const content = fs.readFileSync(bunLockPath, 'utf-8');
+        // Match 4-space indented keys followed by ': [' (package entries, not workspace entries)
+        const re = /^    "([^"]+)": \[/gm;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(content)) !== null) {
+          locked.add(m[1]);
+        }
+        return locked;
+      } catch {
+        // Fall through to other lockfiles
+      }
+    }
+
+    // package-lock.json — proper JSON, packages in the "packages" key
+    const npmLockPath = path.join(rootDir, 'package-lock.json');
+    if (fs.existsSync(npmLockPath)) {
+      try {
+        const lock = JSON.parse(fs.readFileSync(npmLockPath, 'utf-8'));
+        if (lock.packages && typeof lock.packages === 'object') {
+          for (const key of Object.keys(lock.packages)) {
+            // Keys are like "node_modules/express" or "node_modules/@types/node"
+            const pkgName = key.replace(/^node_modules\//, '');
+            if (pkgName) locked.add(pkgName);
+          }
+        }
+        return locked;
+      } catch {
+        // Fall through
+      }
+    }
+
+    // yarn.lock — text format. Package blocks start with "name@version:" or '"@scope/name@version":'
+    const yarnLockPath = path.join(rootDir, 'yarn.lock');
+    if (fs.existsSync(yarnLockPath)) {
+      try {
+        const content = fs.readFileSync(yarnLockPath, 'utf-8');
+        // Match package names from block headers: "name@version, name@other-version:"
+        const re = /^(?:")?(@?[a-z0-9][-a-z0-9._]*)@/gm;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(content)) !== null) {
+          locked.add(m[1]);
+        }
+        return locked;
+      } catch {
+        // Fall through
+      }
+    }
+
+    // pnpm-lock.yaml — YAML format. Package names appear under "packages:" key
+    const pnpmLockPath = path.join(rootDir, 'pnpm-lock.yaml');
+    if (fs.existsSync(pnpmLockPath)) {
+      try {
+        const content = fs.readFileSync(pnpmLockPath, 'utf-8');
+        // Match "  /package-name@version:" or "  /@scope/name@version:" lines
+        const re = /^  \/?(@?[a-z0-9][-a-z0-9._/]*)@/gm;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(content)) !== null) {
+          locked.add(m[1]);
+        }
+        return locked;
+      } catch {
+        // Fall through
+      }
+    }
+
+    return locked;
+  }
+
+  /**
+   * Check if a package exists in node_modules (walking up from file path).
+   * This catches packages installed via workspace hoisting, symlinks, or bundler resolution
+   * that aren't captured by package.json dependency fields or workspace patterns.
+   */
+  private existsInNodeModules(name: string, filePath: string): boolean {
+    const rootDir = path.dirname(this.packageJsonPath);
+    let searchDir = path.dirname(filePath);
+
+    while (searchDir.startsWith(rootDir) || searchDir === rootDir) {
+      const modulePath = path.join(searchDir, 'node_modules', name);
+      // Check for directory or package.json inside (handles scoped packages)
+      if (fs.existsSync(path.join(modulePath, 'package.json')) || fs.existsSync(modulePath)) {
+        return true;
+      }
+
+      const parentDir = path.dirname(searchDir);
+      if (parentDir === searchDir) break;
+      searchDir = parentDir;
+    }
+
+    return false;
   }
 
   /**

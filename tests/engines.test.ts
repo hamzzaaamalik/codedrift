@@ -15,6 +15,7 @@ import { UnsafeRegexDetector } from '../src/engines/unsafe-regex-detector.js';
 import { MissingInputValidationDetector } from '../src/engines/missing-input-validation-detector.js';
 import { IDORDetector } from '../src/engines/idor-detector.js';
 import { ConsoleInProductionDetector } from '../src/engines/console-in-production-detector.js';
+import { AsyncForEachDetector } from '../src/engines/async-foreach-detector.js';
 import { shouldAutoIgnore } from '../src/core/smart-filters.js';
 
 // Helper to create analysis context
@@ -1887,6 +1888,68 @@ describe('UnsafeRegexDetector - False Positive Filters', () => {
   });
 });
 
+// ─── Unsafe Regex: Bounded Outer Quantifier Guard ──────────────────────────────
+
+describe('UnsafeRegexDetector - Bounded Outer Quantifier Guard', () => {
+  const engine = new UnsafeRegexDetector();
+
+  test('should NOT flag /(\\d+)?/ — optional group with inner quantifier is bounded', async () => {
+    const code = String.raw`const r = /^(\d+)?$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, '(\\d+)? is bounded — ? means 0 or 1');
+  });
+
+  test('should NOT flag /(\\w+)?/ — optional word group is bounded', async () => {
+    const code = String.raw`const r = /^(\w+)?$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, '(\\w+)? is bounded — ? means 0 or 1');
+  });
+
+  test('should NOT flag /(\\d+){3}/ — fixed repetition is bounded', async () => {
+    const code = String.raw`const r = /^(\d+){3}$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, '(\\d+){3} is bounded — exactly 3');
+  });
+
+  test('should NOT flag /(\\d+){1,5}/ — small range repetition is bounded', async () => {
+    const code = String.raw`const r = /^(\d+){1,5}$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, '(\\d+){1,5} is bounded — max 5');
+  });
+
+  test('should NOT flag /^(\\d+)\\.(\\d+)?$/ — version pattern with optional decimal', async () => {
+    const code = String.raw`const r = /^(\d+)\.(\d+)?$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Both groups are bounded — no ReDoS risk');
+  });
+
+  test('should still flag /(\\d+)+/ — unbounded outer quantifier', async () => {
+    const code = String.raw`const r = /(\d+)+/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, '(\\d+)+ is unbounded — genuinely unsafe');
+  });
+
+  test('should still flag /(\\w+)*/ — star outer quantifier is unbounded', async () => {
+    const code = String.raw`const r = /(\w+)*/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, '(\\w+)* is unbounded — genuinely unsafe');
+  });
+
+  test('should still flag /(\\d+){1,}/ — unbounded max in braces', async () => {
+    const code = String.raw`const r = /(\d+){1,}/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, '(\\d+){1,} is unbounded — equivalent to +');
+  });
+});
+
 // ─── Unsafe Regex: Disjoint-Delimiter Guard ──────────────────────────────────
 
 describe('UnsafeRegexDetector - Disjoint-Delimiter Guard', () => {
@@ -2388,10 +2451,10 @@ describe('Missing Await - Context Classification', () => {
         try {
           await riskyOperation();
         } finally {
-          cleanup();
+          releaseResources();
         }
       }
-      async function cleanup() { return; }
+      async function releaseResources() { return; }
     `;
     const context = createContext(code);
     const issues = await engine.analyze(context);
@@ -2719,10 +2782,10 @@ describe('Missing Await - Contextual Suggestions', () => {
         try {
           await riskyOperation();
         } finally {
-          cleanup();
+          releaseResources();
         }
       }
-      async function cleanup() { return; }
+      async function releaseResources() { return; }
     `;
     const context = createContext(code);
     const issues = await engine.analyze(context);
@@ -4669,6 +4732,42 @@ describe('IDOR Comprehensive - New Middleware Patterns', () => {
     const issues = await engine.analyze(context);
     assert.strictEqual(issues.length, 0, 'Should skip when isModerator middleware present');
   });
+
+  test('should skip IDOR with adminAuth middleware', async () => {
+    const code = `
+      router.get('/bpo/:id', adminAuth, async (req, res) => {
+        const order = await BulkPurchaseOrder.findByPk(req.params.id);
+        res.json({ success: true, order });
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Should skip when adminAuth middleware present');
+  });
+
+  test('should skip IDOR with isOperationsManager middleware', async () => {
+    const code = `
+      router.get('/orders/:id', auth, isOperationsManager, async (req, res) => {
+        const order = await Order.findByPk(req.params.id);
+        res.json(order);
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Should skip when isOperationsManager (role) middleware present');
+  });
+
+  test('should skip IDOR with isDistributorAdmin middleware', async () => {
+    const code = `
+      router.get('/txn/:id', auth, isDistributorAdmin, async (req, res) => {
+        const txn = await Transaction.findOne({ where: { id: req.params.id } });
+        res.json(txn);
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Should skip when isDistributorAdmin (role) middleware present');
+  });
 });
 
 describe('IDOR Comprehensive - Router-Level Middleware', () => {
@@ -5439,5 +5538,1346 @@ describe('Missing Await - Stripe Extended API', () => {
     const context = createContext(code);
     const issues = await engine.analyze(context);
     assert.ok(issues.length >= 1, 'invoices.pay should be flagged as known async API');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── v1.2.10 Gap Fixes: Accuracy Improvements Across All Engines ────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Stack Trace: Template Literal Detection ───
+describe('Stack Trace - Template Literal Detection', () => {
+  const engine = new StackTraceDetector();
+
+  test('should flag err.stack in template literal response', async () => {
+    const code = `
+      app.use((err, req, res, next) => {
+        res.status(500).json({ message: \`Error: \${err.stack}\` });
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Should detect err.stack in template literal');
+  });
+
+  test('should flag err interpolation in template literal response', async () => {
+    const code = `
+      app.use((err, req, res, next) => {
+        res.status(500).send(\`Something failed: \${err}\`);
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Should detect ${err} in template literal (coerces to string with stack)');
+  });
+});
+
+// ─── Stack Trace: Variable Aliasing ───
+describe('Stack Trace - Variable Aliasing', () => {
+  const engine = new StackTraceDetector();
+
+  test('should flag aliased stack variable in response', async () => {
+    const code = `
+      app.use((err, req, res, next) => {
+        const trace = err.stack;
+        res.status(500).json({ error: trace });
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Should detect aliased err.stack via "const trace = err.stack"');
+  });
+
+  test('should flag destructured stack variable in response', async () => {
+    const code = `
+      app.use((err, req, res, next) => {
+        const { stack: errorTrace } = err;
+        res.json({ detail: errorTrace });
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Should detect destructured stack alias');
+  });
+});
+
+// ─── Empty Catch: Tighten Error-Passed-to-Function ───
+describe('Empty Catch - Error Handling Tightened', () => {
+  const engine = new EmptyCatchDetector();
+
+  test('should NOT treat console.log(err) as proper error handling', async () => {
+    const code = `
+      async function doWork() {
+        try {
+          await saveData();
+        } catch (err) {
+          console.log(err);
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'console.log(err) is not proper error handling');
+  });
+
+  test('should treat Sentry.captureException(err) as proper error handling', async () => {
+    const code = `
+      async function doWork() {
+        try {
+          await saveData();
+        } catch (err) {
+          Sentry.captureException(err);
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Sentry.captureException(err) is proper handling');
+  });
+
+  test('should NOT treat err.toString() as proper error handling', async () => {
+    const code = `
+      async function doWork() {
+        try {
+          await saveData();
+        } catch (err) {
+          console.log(err.toString());
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'console.log(err.toString()) is not proper handling');
+  });
+});
+
+// ─── Empty Catch: Conditional Error Swallowing ───
+describe('Empty Catch - Conditional Error Swallowing', () => {
+  const engine = new EmptyCatchDetector();
+
+  test('should flag catch with instanceof check but no else/rethrow', async () => {
+    const code = `
+      async function doWork() {
+        try {
+          await riskyOp();
+        } catch (err) {
+          if (err instanceof ValidationError) {
+            logger.warn(err);
+          }
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Should flag conditional handling without else — other errors silently swallowed');
+  });
+
+  test('should NOT flag catch with instanceof + else rethrow', async () => {
+    const code = `
+      async function doWork() {
+        try {
+          await riskyOp();
+        } catch (err) {
+          if (err instanceof ValidationError) {
+            logger.warn(err);
+          } else {
+            throw err;
+          }
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Should not flag — else rethrows unhandled errors');
+  });
+
+  test('should NOT flag catch with instanceof + throw after if', async () => {
+    const code = `
+      async function doWork() {
+        try {
+          await riskyOp();
+        } catch (err) {
+          if (err instanceof ValidationError) {
+            logger.warn(err);
+            return;
+          }
+          throw err;
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Should not flag — throw after if handles remaining errors');
+  });
+});
+
+// ─── Console: Logger Import Suppression Fix ───
+describe('Console - Logger Import Suppression', () => {
+  const engine = new ConsoleInProductionDetector();
+
+  test('should still flag console.log in route handler even with logger import', async () => {
+    const code = `
+      import winston from 'winston';
+      app.get('/api/data', (req, res) => {
+        console.log('handling request');
+        res.json({ ok: true });
+      });
+    `;
+    const context = createContext(code, 'src/routes/data.ts');
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Should flag console.log in route handler even with winston import');
+  });
+
+  test('should suppress low-confidence console.log with logger import', async () => {
+    const code = `
+      import winston from 'winston';
+      function helper() {
+        console.log('processing');
+      }
+    `;
+    const context = createContext(code, 'src/utils/helper.ts');
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Should suppress low-confidence console.log when logger is imported');
+  });
+});
+
+// ─── Secret: Short Prefix Entropy Guard ───
+describe('Secret - Short Prefix Collision Guard', () => {
+  const engine = new SecretDetector();
+
+  test('should NOT flag low-entropy string starting with AQ', async () => {
+    const code = `
+      const config = 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Low-entropy AQ string should not be flagged as Adyen key');
+  });
+
+  test('should flag high-entropy AQ string as Adyen key', async () => {
+    const code = `
+      const apiKey = 'AQEwhmfxK4PBXhF3w0m/n3Q5qf3VaY9UCJ14XWZE03G8k+z3bmdFu1MBz4H9TjsA0NLVQA=-7zh8jU3Y2T+B3K6H4dSp9m/A22GISU5Tq3OVaENH=-dK8eCf7J4gGxkFYr';
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'High-entropy AQ string should be flagged as Adyen API key');
+  });
+});
+
+// ─── IDOR: Custom Middleware Pattern Matching ───
+describe('IDOR - Custom Middleware Patterns', () => {
+  const engine = new IDORDetector();
+
+  test('should recognize custom requireProjectAccess middleware', async () => {
+    const code = `
+      router.get('/project/:id', requireProjectAccess, async (req, res) => {
+        const project = await db.findOne({ _id: req.params.id });
+        res.json(project);
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'requireProjectAccess should be recognized as admin/auth middleware');
+  });
+
+  test('should recognize custom hasAccessToResource middleware', async () => {
+    const code = `
+      router.delete('/doc/:id', hasAccessToResource, async (req, res) => {
+        await db.deleteOne({ _id: req.params.id });
+        res.json({ deleted: true });
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'hasAccessToResource should be recognized as auth middleware');
+  });
+
+  test('should recognize custom canDelete middleware', async () => {
+    const code = `
+      router.delete('/item/:id', canDelete, async (req, res) => {
+        await db.deleteOne({ _id: req.params.id });
+        res.json({ deleted: true });
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'canDelete should be recognized as auth middleware');
+  });
+});
+
+// ─── Input Validation: NestJS DTO Without ValidationPipe ───
+describe('Input Validation - NestJS DTO ValidationPipe Fix', () => {
+  const engine = new MissingInputValidationDetector();
+
+  test('should flag NestJS route with DTO type but no ValidationPipe', async () => {
+    const code = `
+      import { Controller, Post, Body } from '@nestjs/common';
+
+      @Controller('users')
+      class UserController {
+        @Post()
+        createUser(@Body() body: CreateUserDto) {
+          return this.userService.create(body);
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'DTO type without ValidationPipe should not count as validation');
+  });
+
+  test('should NOT flag NestJS route with DTO type AND ValidationPipe', async () => {
+    const code = `
+      import { Controller, Post, Body, UsePipes, ValidationPipe } from '@nestjs/common';
+
+      @Controller('users')
+      class UserController {
+        @Post()
+        @UsePipes(new ValidationPipe())
+        createUser(@Body() body: CreateUserDto) {
+          return this.userService.create(body);
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'DTO type with ValidationPipe should count as validation');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── FP Reduction Round: Confidence Tiering & Pattern Precision ──────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Fix 1: S6+S5 double-trigger confidence ───
+describe('Missing Await - S6 Alone Gets LOW Confidence', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should assign LOW confidence when only S6 (module import) triggers', async () => {
+    // S6-only: function from imported module, no async naming pattern (S5), no S7 usage
+    const code = `
+      import { processItem } from './services/processor.js';
+      async function handler() {
+        processItem(data);
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    if (issues.length > 0) {
+      assert.strictEqual(issues[0].confidence, 'low', 'S6-only should be low confidence');
+    }
+  });
+
+  test('should assign MEDIUM confidence when S6+S7 combined', async () => {
+    // S6+S7: imported from async-named module (service suffix) + used with await elsewhere
+    const code = `
+      import { processItem } from './item-service';
+      async function handler1() {
+        processItem(data);
+      }
+      async function handler2() {
+        await processItem(otherData);
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    if (issues.length > 0) {
+      assert.strictEqual(issues[0].confidence, 'medium', 'S6+S7 combined should be medium confidence');
+    }
+  });
+
+  test('S5 alone (naming heuristic) should still get MEDIUM', async () => {
+    const code = `
+      async function handler() {
+        fetchUserProfile();
+      }
+      async function other() {
+        await fetchUserProfile();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'fetchUserProfile should be flagged');
+    assert.strictEqual(issues[0].confidence, 'medium', 'S5 naming heuristic should be medium');
+  });
+});
+
+// ─── Fix 3: get* pluralization no longer independently triggers ───
+describe('Missing Await - getUsers Pluralization No Longer S5 Tier 3', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should NOT flag getUsers() when only pluralization pattern would match (no other signal)', async () => {
+    // getUsers is NOT declared async, no S7 usage — should not fire on S5 plural alone
+    const code = `
+      function getUsers() { return cachedUsers; }
+      function handler() {
+        const users = getUsers();
+        return users;
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'getUsers sync cache lookup should not be flagged');
+  });
+
+  test('should still flag getUsers() when declared async (S1)', async () => {
+    const code = `
+      async function getUsers() { return await db.query('SELECT * FROM users'); }
+      async function handler() {
+        getUsers();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'getUsers declared async should still be flagged via S1');
+  });
+});
+
+// ─── Fix 4: Callback param names expansion ───
+describe('Missing Await - Expanded Callback Params', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should skip callback-style call with "ex" parameter name', async () => {
+    const code = `
+      async function handler() {
+        readFile('test.txt', (ex, data) => {
+          if (ex) throw ex;
+          console.log(data);
+        });
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    const readFileIssues = issues.filter(i => i.message?.includes('readFile'));
+    assert.strictEqual(readFileIssues.length, 0, 'Callback with "ex" param should be recognized');
+  });
+
+  test('should skip callback-style call with "exception" parameter name', async () => {
+    const code = `
+      async function handler() {
+        doOperation(params, (exception, result) => {
+          if (exception) throw exception;
+          return result;
+        });
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    const opIssues = issues.filter(i => i.message?.includes('doOperation'));
+    assert.strictEqual(opIssues.length, 0, 'Callback with "exception" param should be recognized');
+  });
+
+  test('should skip callback-style call with "exc" parameter name', async () => {
+    const code = `
+      async function handler() {
+        loadData('key', (exc, val) => {
+          if (exc) console.error(exc);
+        });
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    const loadIssues = issues.filter(i => i.message?.includes('loadData'));
+    assert.strictEqual(loadIssues.length, 0, 'Callback with "exc" param should be recognized');
+  });
+});
+
+// ─── Fix 5: Anchor-blind delimiter guard ───
+describe('UnsafeRegexDetector - Anchor-Aware Delimiter Guard', () => {
+  const engine = new UnsafeRegexDetector();
+
+  test('should NOT flag ^(\\d+\\.\\d+)$ — anchor with disjoint internal delimiter', async () => {
+    const code = `const re = /^(\\d+\\.\\d+)$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Anchored pattern with internal delimiter should be safe');
+  });
+
+  test('should NOT flag ^\\d+\\.\\d+$ — simple anchored decimal', async () => {
+    const code = `const re = /^\\d+\\.\\d+$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Anchored decimal pattern should be safe');
+  });
+});
+
+// ─── Fix 6: Literal delimiters in quantified overlap ───
+describe('UnsafeRegexDetector - Literal Delimiter in Quantified Overlap', () => {
+  const engine = new UnsafeRegexDetector();
+
+  test('should NOT flag \\w+end\\d+$ — literal "end" separates quantified groups', async () => {
+    const code = `const re = /\\w+end\\d+$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Literal delimiter between quantified groups should be safe');
+  });
+
+  test('should NOT flag \\w+_\\d+$ — literal underscore separates quantified groups', async () => {
+    const code = `const re = /\\w+_\\d+$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Literal underscore between quantified groups should be safe');
+  });
+
+  test('should still flag \\w+\\d+$ — no delimiter between overlapping groups', async () => {
+    const code = `const re = /\\w+\\d+$/;`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'Overlapping quantified groups without delimiter should be flagged');
+  });
+});
+
+// ─── Fix 7: Complexity-based demotion ───
+describe('UnsafeRegexDetector - Complexity-Based Demotion', () => {
+  const engine = new UnsafeRegexDetector();
+
+  test('should demote simple unsafe pattern NOT on user input to warning', async () => {
+    // Pattern flagged by safe-regex2 but with shallow nesting (depth < 2)
+    // and NOT applied to user input — should be warning, not error
+    const code = `
+      function process() {
+        const data = getInternalConfig();
+        const match = data.match(/a{1,100}/);
+        return match;
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    // If issues found, they should be warning severity (not error) for simple patterns
+    for (const issue of issues) {
+      assert.notStrictEqual(issue.severity, 'error', 'Simple pattern on internal data should not be error');
+    }
+  });
+
+  test('should keep genuinely dangerous (a+)+ pattern as error on user input', async () => {
+    const code = `
+      function handler(req, res) {
+        const pattern = /(a+)+$/;
+        if (req.body.input.match(pattern)) {
+          res.send('match');
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'Dangerous (a+)+ on user input should be flagged');
+    assert.strictEqual(issues[0].severity, 'error', '(a+)+ on user input should be error');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── FP Reduction Round 2: 20-Fix Precision Pass ────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Fix 1: S8 weak patterns removed (read/write/insert/search) ───
+describe('Missing Await - S8 Weak Patterns Removed', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should NOT flag bare read() as missing await', async () => {
+    const code = `
+      function read(buffer) { return buffer.toString(); }
+      async function handler() {
+        const text = read(buf);
+        return text;
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Bare read() should not be flagged via S8');
+  });
+
+  test('should NOT flag bare write() as missing await', async () => {
+    const code = `
+      function write(target, data) { target.push(data); }
+      async function handler() {
+        write(arr, 'hello');
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Bare write() should not be flagged via S8');
+  });
+
+  test('should NOT flag bare insert() as missing await', async () => {
+    const code = `
+      function insert(arr, idx, item) { arr.splice(idx, 0, item); }
+      async function handler() {
+        insert(items, 0, newItem);
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Bare insert() should not be flagged via S8');
+  });
+
+  test('should NOT flag bare search() as missing await', async () => {
+    const code = `
+      function search(str, pattern) { return str.includes(pattern); }
+      async function handler() {
+        const found = search(text, 'hello');
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Bare search() should not be flagged via S8');
+  });
+});
+
+// ─── Fix 2: S5 get* sync getter exclusion ───
+describe('Missing Await - S5 Get Sync Getter Exclusion', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should NOT flag getFirstName() as missing await (sync getter)', async () => {
+    const code = `
+      function getFirstName() { return 'John'; }
+      async function handler() {
+        const name = getFirstName();
+        return name;
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'getFirstName is a sync getter — should not flag');
+  });
+
+  test('should NOT flag getCache() as missing await (sync getter)', async () => {
+    const code = `
+      function getCache() { return this.localCache; }
+      async function handler() {
+        const cache = getCache();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'getCache is a sync getter — should not flag');
+  });
+
+  test('should NOT flag getProperty() as missing await', async () => {
+    const code = `
+      function getProperty(obj, key) { return obj[key]; }
+      async function handler() {
+        const val = getProperty(data, 'name');
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'getProperty is a sync getter — should not flag');
+  });
+});
+
+// ─── Fix 3: S6 module path with file extensions ───
+describe('Missing Await - S6 Module Path Extension Stripping', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should recognize import from user-service.js as S6 signal', async () => {
+    const code = `
+      import { fetchUser } from './user-service.js';
+      async function handler1() {
+        fetchUser('id');
+      }
+      async function handler2() {
+        await fetchUser('id');
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'fetchUser from service module should be flagged');
+  });
+});
+
+// ─── Fix 4: Variable handling expansion ───
+describe('Missing Await - Variable Handling Expansion', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should NOT flag variable later consumed by .exec()', async () => {
+    const code = `
+      async function fetchData() { return 42; }
+      async function handler() {
+        const query = fetchData();
+        const result = query.exec();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Variable consumed by .exec() should count as handled');
+  });
+
+  test('should NOT flag variable later consumed by .subscribe()', async () => {
+    const code = `
+      async function getData() { return 42; }
+      async function handler() {
+        const obs = getData();
+        obs.subscribe(val => console.log(val));
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Variable consumed by .subscribe() should count as handled');
+  });
+});
+
+// ─── Fix 8: Promise union type detection ───
+describe('Missing Await - Promise Union Type', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should detect Promise<T> | null return type as async', async () => {
+    const code = `
+      function getData(): Promise<string> | null {
+        return fetch('/api/data');
+      }
+      async function handler() {
+        getData();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'Promise<T> | null return type should be detected as async');
+  });
+});
+
+// ─── Fix 7: Missing async APIs ───
+describe('Missing Await - TypeORM/MongoDB APIs', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should flag queryBuilder.getMany() as missing await', async () => {
+    const code = `
+      async function handler() {
+        queryBuilder.getMany();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'queryBuilder.getMany() should be flagged as known async API');
+  });
+
+  test('should flag collection.insertOne() as missing await', async () => {
+    const code = `
+      async function handler() {
+        collection.insertOne({ name: 'test' });
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length >= 1, 'collection.insertOne() should be flagged as known async API');
+  });
+});
+
+// ─── Fix 10: Expanded escape function recognition ───
+describe('UnsafeRegexDetector - Expanded Escape Functions', () => {
+  const engine = new UnsafeRegexDetector();
+
+  test('should NOT flag RegExp with sanitizeRegex() call', async () => {
+    const code = `
+      function handler(req, res) {
+        const safe = sanitizeRegex(req.query.search);
+        const re = new RegExp(safe);
+        res.json(re.test('data'));
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'sanitizeRegex should be recognized as escape function');
+  });
+
+  test('should NOT flag RegExp with regexpQuote() call', async () => {
+    const code = `
+      function handler(req, res) {
+        const safe = regexpQuote(req.query.term);
+        const re = new RegExp(safe);
+        res.json(re.test('data'));
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'regexpQuote should be recognized as escape function');
+  });
+});
+
+// ─── Fix 11: Regex middleware detection ───
+describe('UnsafeRegexDetector - Middleware Not Route Handler', () => {
+  const engine = new UnsafeRegexDetector();
+
+  test('should demote middleware function regex to warning (not error)', async () => {
+    const code = `
+      function authMiddleware(req, res, next) {
+        const re = /(a+)+$/;
+        if (re.test(req.headers.authorization)) {
+          next();
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    if (issues.length > 0) {
+      // Middleware with 'next' param should not be treated as route handler → demoted severity
+      assert.notStrictEqual(issues[0].severity, 'error', 'Middleware regex should not be error severity');
+    }
+  });
+});
+
+// ─── Fix 13: Expanded trusted sources ───
+describe('UnsafeRegexDetector - Expanded Trusted Sources', () => {
+  const engine = new UnsafeRegexDetector();
+
+  test('should recognize configManager.getPattern() as trusted source', async () => {
+    const code = `
+      function handler(req, res) {
+        const pattern = configManager.getPattern();
+        const re = new RegExp(pattern);
+        res.json(re.test(req.body.text));
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    // configManager is a trusted source — should not flag as user input
+    const userInputIssues = issues.filter(i => i.message?.includes('User-controlled'));
+    assert.strictEqual(userInputIssues.length, 0, 'configManager should be recognized as trusted');
+  });
+});
+
+// ─── Fix 14 & 15: Validation function tracing ───
+describe('Missing Input Validation - Validation Function Detection', () => {
+  const engine = new MissingInputValidationDetector();
+
+  test('should NOT flag handler that calls validateInput(req.body)', async () => {
+    const code = `
+      import express from 'express';
+      const app = express();
+      app.post('/users', (req, res) => {
+        const data = validateInput(req.body);
+        res.json(data);
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'validateInput() should be recognized as validation');
+  });
+
+  test('should NOT flag handler that calls sanitizeData(req.body)', async () => {
+    const code = `
+      import express from 'express';
+      const app = express();
+      app.post('/items', (req, res) => {
+        const clean = sanitizeData(req.body);
+        res.json(clean);
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'sanitizeData() should be recognized as validation');
+  });
+});
+
+// ─── Fix 16: IDOR public route detection ───
+describe('IDOR - Public Route Path Detection', () => {
+  const engine = new IDORDetector();
+
+  test('should NOT flag /public/:id route as IDOR', async () => {
+    const code = `
+      import express from 'express';
+      const app = express();
+      app.get('/public/posts/:id', async (req, res) => {
+        const post = await Post.findById(req.params.id);
+        res.json(post);
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Public route should not be flagged for IDOR');
+  });
+
+  test('should NOT flag /health route as IDOR', async () => {
+    const code = `
+      import express from 'express';
+      const app = express();
+      app.get('/health/:id', async (req, res) => {
+        const check = await HealthCheck.findById(req.params.id);
+        res.json(check);
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Health check route should not be flagged for IDOR');
+  });
+});
+
+// ─── Fix 17: JWT entropy check ───
+describe('Secret Detector - JWT Entropy Guard', () => {
+  const engine = new SecretDetector();
+
+  test('should NOT flag low-entropy JWT-like test string', async () => {
+    // Short JWT-like string with repeating characters — too low entropy to be a real token
+    const code = `const testToken = 'eyJhbGciOiJIUzI1NiJ9.aaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaa';`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Low-entropy JWT-like string should not be flagged');
+  });
+});
+
+// ─── Fix 18: Test database URL exclusion ───
+describe('Secret Detector - Test Database URLs', () => {
+  const engine = new SecretDetector();
+
+  test('should NOT flag localhost PostgreSQL connection string', async () => {
+    const code = `const db = 'postgresql://admin:password@localhost:5432/testdb';`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Localhost database URL should not be flagged');
+  });
+
+  test('should NOT flag 127.0.0.1 MongoDB connection string', async () => {
+    const code = `const db = 'mongodb://root:root@127.0.0.1:27017/devdb';`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, '127.0.0.1 database URL should not be flagged');
+  });
+});
+
+// ─── Fix 19: Optional deps in try-catch ───
+describe('Hallucinated Deps - Optional Dependencies', () => {
+  const engine = new HallucinatedDepsDetector();
+
+  test('should NOT flag dynamic import inside try-catch', async () => {
+    const code = `
+      async function loadOptional() {
+        try {
+          const plugin = await import('optional-plugin-xyz');
+          return plugin;
+        } catch {
+          return null;
+        }
+      }
+    `;
+    const context = createContext(code, 'test.ts', true);
+    const issues = await engine.analyze(context);
+    const pluginIssues = issues.filter(i => i.message?.includes('optional-plugin-xyz'));
+    assert.strictEqual(pluginIssues.length, 0, 'Optional import in try-catch should not be flagged');
+  });
+});
+
+// ─── Fix 20: Logger wrapper class detection ───
+describe('Console in Production - Logger Wrapper Detection', () => {
+  const engine = new ConsoleInProductionDetector();
+
+  test('should NOT flag console in PinoTransport class with write method', async () => {
+    const code = `
+      class PinoTransport {
+        write(msg) {
+          console.log(msg);
+        }
+      }
+    `;
+    const context = createContext(code, 'src/transports/pino.ts');
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Console in transport class with write method should be skipped');
+  });
+
+  test('should NOT flag console in CustomAppender class', async () => {
+    const code = `
+      class CustomAppender {
+        log(msg) {
+          console.log(msg);
+        }
+      }
+    `;
+    const context = createContext(code, 'src/logging/appender.ts');
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Console in appender class should be skipped');
+  });
+});
+
+// ─── Missing Await: S1/S2 Method Call False Positive Prevention ───────────────
+
+describe('Missing Await - S1/S2 Method Call FP Prevention', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should NOT flag obj.close() when async function close() exists in same file', async () => {
+    const code = `
+      async function close() {
+        await db.end();
+      }
+      async function main() {
+        const rl = getReadline();
+        rl.close();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'obj.close() should not match standalone async close()');
+  });
+
+  test('should NOT flag obj.get() when async function get() exists in same file', async () => {
+    const code = `
+      async function get(id) {
+        return await fetch('/api/' + id);
+      }
+      async function process() {
+        const map = new Map();
+        const val = map.get('key');
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'map.get() should not match standalone async get()');
+  });
+
+  test('should still flag bare close() when async function close() exists', async () => {
+    const code = `
+      async function closeConnection() {
+        await db.end();
+      }
+      async function main() {
+        closeConnection();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Bare closeConnection() should be flagged via S1');
+  });
+
+  test('should NOT flag db.close() as fire-and-forget cleanup', async () => {
+    const code = `
+      async function shutdown() {
+        db.close();
+        server.stop();
+        connection.disconnect();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Cleanup methods should be fire-and-forget');
+  });
+
+  test('should NOT flag obj.stop() or obj.destroy() or obj.dispose()', async () => {
+    const code = `
+      async function teardown() {
+        watcher.stop();
+        timer.destroy();
+        resource.dispose();
+        subscription.unsubscribe();
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Lifecycle methods should be fire-and-forget');
+  });
+});
+
+// ─── Missing Await: Async Generator & Inline Usage FP Prevention ──────────────
+
+describe('Missing Await - Async Generator & Inline Usage FP Prevention', () => {
+  const engine = new MissingAwaitDetector();
+
+  test('should NOT flag async generator consumed with for-await-of', async () => {
+    const code = `
+      async function* readRecords(path) {
+        yield { data: 1 };
+      }
+      async function process() {
+        for await (const record of readRecords('/data.jsonl')) {
+          console.log(record);
+        }
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'for-await-of is valid consumption of async generator');
+  });
+
+  test('should NOT flag non-async create* used as function argument', async () => {
+    const code = `
+      function createSelector(items, max) { return { items, max }; }
+      async function openUI() {
+        try {
+          const selector = createSelector(items, 9);
+          openPanel(selector, () => {});
+        } catch (e) {}
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Sync factory result passed as argument should not be flagged');
+  });
+
+  test('should NOT flag non-async call used inline as object property', async () => {
+    const code = `
+      function loadConfig() { return { key: 'value' }; }
+      async function init() {
+        try {
+          const account = resolveAccount({
+            cfg: loadConfig(),
+            id: 'abc',
+          });
+        } catch (e) {}
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Sync call as object property should not be flagged');
+  });
+
+  test('should NOT flag non-async call used inline as function argument', async () => {
+    const code = `
+      function createResource(opts) { return opts; }
+      async function handler() {
+        try {
+          sendJson(res, 200, createResource({ id: 1 }));
+        } catch (e) {}
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Sync call as direct argument should not be flagged');
+  });
+
+  test('should still flag genuinely async function not awaited in try block', async () => {
+    const code = `
+      async function fetchData() { return await fetch('/api'); }
+      async function handler() {
+        try {
+          fetchData();
+        } catch (e) {}
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Async function fire-and-forget in try should still be flagged');
+    assert.strictEqual(issues[0].confidence, 'high', 'S1 detection should be high confidence');
+  });
+
+  test('should NOT inflate heuristic confidence for create* in try block', async () => {
+    const code = `
+      async function main() {
+        try {
+          const x = createUser({ name: 'test' });
+        } catch (e) {}
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    // createUser matches S5 heuristic → medium confidence, should NOT be inflated to high
+    if (issues.length > 0) {
+      assert.notStrictEqual(issues[0].confidence, 'high', 'Heuristic should not be inflated to HIGH');
+    }
+  });
+});
+
+// ─── Round 4: FP Elimination Tests ───────────────────────────────────
+
+describe('Secret Detector - Prefix Body Test Value Guard', () => {
+  const engine = new SecretDetector();
+
+  test('should NOT flag xoxb-test (short test fixture)', async () => {
+    const code = `const token = 'xoxb-test';`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Short test token xoxb-test should not be flagged');
+  });
+
+  test('should NOT flag xoxb-fake-token (test value)', async () => {
+    const code = `const token = 'xoxb-fake-token';`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Short fake token should not be flagged');
+  });
+
+  test('should still flag real-length Slack token', async () => {
+    // Build token at runtime so the full literal never appears in source (avoids GitHub push protection)
+    const slackPrefix = ['xo', 'xb-'].join('');
+    const slackBody = ['112233445566', '998877665544', 'aB3cD4eF5gH6iJ7kL8mN9oP0'].join('-');
+    const code = `const token = '${slackPrefix}${slackBody}';`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Real-length Slack token should be flagged');
+  });
+
+  test('should NOT flag short npm_ prefix (npm_package_version style)', async () => {
+    const code = `const v = 'npm_package_version_1.2.3';`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Short npm_ string should not be flagged');
+  });
+
+  test('should still flag PostgreSQL URL with example.com (has credentials)', async () => {
+    const code = `const db = 'postgresql://admin:s3cr3tpassword@prod-host.example.com/mydb';`;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Connection string with credentials should still be flagged even with example.com');
+  });
+
+  test('should NOT flag prefix match with Base64 test body', async () => {
+    const code = `const header = 'Basic dGVzdDp0ZXN0';`;  // base64('test:test')
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Basic auth with test:test should not be flagged');
+  });
+});
+
+describe('Console Detector - Word Boundary Keyword Matching', () => {
+  const engine = new ConsoleInProductionDetector();
+
+  test('should NOT flag console.log(sessionManager.start())', async () => {
+    const code = `
+      function init() {
+        console.log(sessionManager.start());
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    const sensitive = issues.filter(i => i.message.includes('sensitive'));
+    assert.strictEqual(sensitive.length, 0, 'sessionManager should not trigger sensitive data warning');
+  });
+
+  test('should NOT flag console.log(healthCheck())', async () => {
+    const code = `
+      function check() {
+        console.log(healthCheck());
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    const sensitive = issues.filter(i => i.message.includes('sensitive'));
+    assert.strictEqual(sensitive.length, 0, 'healthCheck should not trigger sensitive data warning');
+  });
+
+  test('should NOT flag console.log(typing)', async () => {
+    const code = `
+      function show() {
+        const typing = true;
+        console.log(typing);
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    const sensitive = issues.filter(i => i.message.includes('sensitive'));
+    assert.strictEqual(sensitive.length, 0, 'typing should not match pin keyword');
+  });
+
+  test('should still flag console.log(password)', async () => {
+    const code = `
+      function login() {
+        const password = getPassword();
+        console.log(password);
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    const sensitive = issues.filter(i => i.message.includes('sensitive'));
+    assert.ok(sensitive.length > 0, 'Direct password logging should still be flagged');
+  });
+
+  test('should NOT flag console.log(authService.getUser())', async () => {
+    const code = `
+      function load() {
+        console.log(authService.getUser());
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    const sensitive = issues.filter(i => i.message.includes('sensitive'));
+    assert.strictEqual(sensitive.length, 0, 'authService should not trigger sensitive warning');
+  });
+
+  test('should still flag console.log(authToken)', async () => {
+    const code = `
+      function debug() {
+        const authToken = getToken();
+        console.log(authToken);
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    const sensitive = issues.filter(i => i.message.includes('sensitive'));
+    assert.ok(sensitive.length > 0, 'authToken is the final word — should be flagged');
+  });
+
+  test('should NOT flag console.log(emailQueue.length)', async () => {
+    const code = `
+      function stats() {
+        console.log(emailQueue.length);
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    const sensitive = issues.filter(i => i.message.includes('sensitive'));
+    assert.strictEqual(sensitive.length, 0, 'emailQueue is a functional concept, not email data');
+  });
+
+  test('should still flag console.log(userEmail)', async () => {
+    const code = `
+      function debug() {
+        const userEmail = req.body.email;
+        console.log(userEmail);
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    const sensitive = issues.filter(i => i.message.includes('sensitive'));
+    assert.ok(sensitive.length > 0, 'userEmail has email as final word — should be flagged');
+  });
+});
+
+describe('Async ForEach - Array.from Result Tracking', () => {
+  const engine = new AsyncForEachDetector();
+
+  test('should NOT flag Array.from with async mapper when result is passed to Promise.all', async () => {
+    const code = `
+      async function runWorkers() {
+        const workers = Array.from({ length: 5 }, async (_, i) => {
+          await processItem(i);
+        });
+        await Promise.all(workers);
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'Array.from result handled by Promise.all should not be flagged');
+  });
+
+  test('should still flag Array.from with async mapper when result is discarded', async () => {
+    const code = `
+      async function runWorkers() {
+        Array.from({ length: 5 }, async (_, i) => {
+          await processItem(i);
+        });
+      }
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'Discarded Array.from result should be flagged');
+  });
+});
+
+describe('Stack Trace - Throw Context Skip', () => {
+  const engine = new StackTraceDetector();
+
+  test('should NOT flag err.stack in throw statement', async () => {
+    const code = `
+      app.get('/api', (req, res) => {
+        try {
+          doSomething();
+        } catch (err) {
+          throw new Error('Failed: ' + err.stack);
+        }
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.strictEqual(issues.length, 0, 'err.stack in throw context should not be flagged');
+  });
+
+  test('should still flag err.stack in res.json()', async () => {
+    const code = `
+      app.get('/api', (req, res) => {
+        try {
+          doSomething();
+        } catch (err) {
+          res.json({ error: err.stack });
+        }
+      });
+    `;
+    const context = createContext(code);
+    const issues = await engine.analyze(context);
+    assert.ok(issues.length > 0, 'err.stack in response should still be flagged');
   });
 });

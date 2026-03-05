@@ -262,6 +262,10 @@ export class AsyncForEachDetector extends BaseEngine {
     // Skip if within Promise wrapper
     if (this.isWithinSafePromiseWrapper(node)) return null;
 
+    // Track result — same as map(): if result is assigned and later passed to Promise.all, it's handled
+    const mapResultStatus = this.classifyMapResult(node);
+    if (mapResultStatus === 'handled') return null;
+
     const hasAwaitInCallback = this.hasAwaitExpression(resolved.callbackNode);
     const confidence = hasAwaitInCallback ? 'high' : 'medium';
 

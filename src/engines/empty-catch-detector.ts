@@ -109,6 +109,17 @@ export class EmptyCatchDetector extends BaseEngine {
       });
     }
 
+    // Check for conditional error swallowing BEFORE isErrorHandled:
+    // if (err instanceof X) { handle(err) } — no else/rethrow for other error types.
+    // Must come first because isErrorHandled would return true (err IS passed to a function).
+    if (this.hasConditionalSwallowing(block, catchClause)) {
+      return this.createIssue(context, catchClause, 'Catch block only handles some error types - others silently swallowed', {
+        severity: 'warning',
+        suggestion: 'Add else clause to re-throw or log unhandled error types',
+        confidence: 'medium',
+      });
+    }
+
     // Check if error is properly handled (logger, monitoring, passed to function, instanceof)
     if (this.isErrorHandled(catchClause)) {
       return null;
@@ -160,8 +171,17 @@ export class EmptyCatchDetector extends BaseEngine {
     traverse(catchClause.block, (node) => {
       if (handled) return;
 
-      // Check if error variable is passed as argument to any function call
+      // Check if error variable is passed as argument to a meaningful handler function
+      // Excludes: console.*, JSON.stringify, .toString() — these don't actually handle the error
       if (ts.isCallExpression(node)) {
+        // Skip console.* calls — logging is not handling
+        if (ts.isPropertyAccessExpression(node.expression)) {
+          const obj = this.getObjectName(node.expression.expression);
+          const method = node.expression.name.text;
+          if (obj === 'console') return; // console.log(err) is NOT handling
+          if (obj === 'JSON' && method === 'stringify') return; // JSON.stringify(err) is NOT handling
+          if (method === 'toString') return; // err.toString() is NOT handling
+        }
         for (const arg of node.arguments) {
           if (this.containsIdentifier(arg, errorVarName)) {
             handled = true;
@@ -427,6 +447,90 @@ export class EmptyCatchDetector extends BaseEngine {
     }
 
     // All statements are console calls - flag as not production-ready
+    return true;
+  }
+
+  /**
+   * Check if catch block conditionally handles some error types but silently drops others.
+   * Pattern: if (err instanceof SpecificError) { handle(err); }  ← no else/rethrow
+   */
+  private hasConditionalSwallowing(block: ts.Block, catchClause: ts.CatchClause): boolean {
+    const variableDecl = catchClause.variableDeclaration;
+    if (!variableDecl) return false;
+
+    const errorName = variableDecl.name;
+    if (!ts.isIdentifier(errorName)) return false;
+    const errorVarName = errorName.text;
+
+    // Look for if-statements that test the error type
+    for (const stmt of block.statements) {
+      if (!ts.isIfStatement(stmt)) continue;
+
+      // Check if the condition involves instanceof on the error variable
+      const hasInstanceofCheck = this.conditionHasInstanceof(stmt.expression, errorVarName);
+      if (!hasInstanceofCheck) continue;
+
+      // Only flag if the error variable is actually used inside the if-body
+      // (i.e., there's real error handling for matched types, but others are dropped)
+      // Use word-boundary check to avoid matching substrings (e.g., "error" containing "err")
+      const thenText = stmt.thenStatement.getText();
+      const errorVarRegex = new RegExp(`\\b${errorVarName}\\b`);
+      if (!errorVarRegex.test(thenText)) continue;
+
+      // If there's no else clause (or else-if chain that ends without else),
+      // unmatched error types fall through silently
+      if (!this.hasTerminalElse(stmt)) {
+        // Make sure the code after the if doesn't re-throw or handle
+        const ifIndex = block.statements.indexOf(stmt);
+        const remainingStatements = block.statements.slice(ifIndex + 1);
+
+        // If nothing after the if, unmatched errors are swallowed
+        if (remainingStatements.length === 0) {
+          return true;
+        }
+
+        // Check if remaining statements handle the error (throw, logger call, etc.)
+        let handledAfter = false;
+        for (const remaining of remainingStatements) {
+          if (ts.isThrowStatement(remaining)) { handledAfter = true; break; }
+          const text = remaining.getText();
+          if (text.includes(errorVarName)) { handledAfter = true; break; }
+        }
+        if (!handledAfter) return true;
+      }
+    }
+
+    return false;
+  }
+
+  /** Check if an expression contains `errorVar instanceof Something` */
+  private conditionHasInstanceof(expr: ts.Expression, errorVarName: string): boolean {
+    if (ts.isBinaryExpression(expr)) {
+      if (expr.operatorToken.kind === ts.SyntaxKind.InstanceOfKeyword) {
+        if (ts.isIdentifier(expr.left) && expr.left.text === errorVarName) {
+          return true;
+        }
+      }
+      // Check both sides of && or ||
+      if (expr.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
+          expr.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+        return this.conditionHasInstanceof(expr.left, errorVarName) ||
+               this.conditionHasInstanceof(expr.right, errorVarName);
+      }
+    }
+    if (ts.isParenthesizedExpression(expr)) {
+      return this.conditionHasInstanceof(expr.expression, errorVarName);
+    }
+    return false;
+  }
+
+  /** Check if an if-statement chain ends with a terminal else (not else-if without else) */
+  private hasTerminalElse(stmt: ts.IfStatement): boolean {
+    if (!stmt.elseStatement) return false;
+    if (ts.isIfStatement(stmt.elseStatement)) {
+      return this.hasTerminalElse(stmt.elseStatement);
+    }
+    // Has a plain else block
     return true;
   }
 }

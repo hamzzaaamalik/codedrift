@@ -190,6 +190,42 @@ export class IDORDetector extends BaseEngine {
     'checkresourceowner', 'ownermiddleware',
   ]);
 
+  /** Regex patterns for custom admin/role middleware names not in the hardcoded Set */
+  private static readonly ADMIN_MIDDLEWARE_PATTERNS = [
+    /^require.*(?:admin|role|permission|scope|auth)/i,
+    /^check.*(?:admin|role|permission|scope|auth)/i,
+    /^ensure.*(?:admin|role|permission|auth)/i,
+    /^verify.*(?:role|permission|auth)/i,
+    // Matches: adminGuard, adminAuth, adminOnly, adminRequired, roleAuth, permissionAuth, etc.
+    // Any middleware whose first word is a role/admin concept and terminates with an
+    // access-control suffix is unambiguously an authorization gate.
+    /^(?:admin|role|permission|superadmin).*(?:guard|middleware|check|auth|only|required|access|verify)/i,
+    // Matches is{Role} convention: isAdmin, isOperationsManager, isCustodianOrOps,
+    // isDistributorAdmin, isSuperAdmin, isVendor, etc.
+    // Any middleware that starts with 'is' and contains a role/privilege concept
+    // is asserting that the caller belongs to that role — it's an authorization gate.
+    /^is.*(?:admin|manager|supervisor|operator|moderator|staff|ops|operations|distributor|custodian|vendor|supplier|reseller|executive|director|owner)/i,
+    /^can(?:access|manage|delete|update|create|read|write)/i,
+    /^has(?:access|role|permission|authority)/i,
+  ];
+
+  /** Regex patterns for custom ownership middleware names not in the hardcoded Set */
+  private static readonly OWNERSHIP_MIDDLEWARE_PATTERNS = [
+    /^(?:require|check|verify|ensure|validate).*(?:owner|ownership)/i,
+    /^(?:is|belongs).*(?:owner|resource)/i,
+    /^owner.*(?:check|guard|middleware)/i,
+  ];
+
+  /** Classify a middleware name as 'admin', 'ownership', or null using both hardcoded Sets and regex patterns. */
+  private static classifyMiddleware(name: string): 'admin' | 'ownership' | null {
+    const lower = name.toLowerCase();
+    if (IDORDetector.ADMIN_MIDDLEWARE.has(lower)) return 'admin';
+    if (IDORDetector.OWNERSHIP_MIDDLEWARE.has(lower)) return 'ownership';
+    if (IDORDetector.ADMIN_MIDDLEWARE_PATTERNS.some(p => p.test(name))) return 'admin';
+    if (IDORDetector.OWNERSHIP_MIDDLEWARE_PATTERNS.some(p => p.test(name))) return 'ownership';
+    return null;
+  }
+
   async analyze(context: AnalysisContext): Promise<Issue[]> {
     const issues: Issue[] = [];
     const flaggedLines = new Set<number>();
@@ -737,9 +773,8 @@ export class IDORDetector extends BaseEngine {
       }
 
       if (middlewareName) {
-        const lower = middlewareName.toLowerCase();
-        if (IDORDetector.ADMIN_MIDDLEWARE.has(lower)) return 'admin';
-        if (IDORDetector.OWNERSHIP_MIDDLEWARE.has(lower)) return 'ownership';
+        const classification = IDORDetector.classifyMiddleware(middlewareName);
+        if (classification) return classification;
       }
 
       // Check call expression string arguments for 'admin'/'superadmin'
@@ -842,6 +877,16 @@ export class IDORDetector extends BaseEngine {
     // If auth middleware IS present, this is not a public route — don't skip
     if (hasAuthMiddleware) {
       return false;
+    }
+
+    // Check if route path explicitly indicates a public endpoint
+    const firstArg = args[0];
+    if (ts.isStringLiteral(firstArg) || ts.isNoSubstitutionTemplateLiteral(firstArg)) {
+      const routePath = firstArg.text.toLowerCase();
+      const publicPathPatterns = ['/public', '/open', '/guest', '/anonymous', '/shared', '/health', '/ping', '/status', '/version'];
+      if (publicPathPatterns.some(p => routePath.includes(p))) {
+        return true; // Explicitly public route — skip IDOR
+      }
     }
 
     // No auth middleware found. Now check conservatively: does the handler body
@@ -1134,9 +1179,7 @@ export class IDORDetector extends BaseEngine {
         }
 
         if (middlewareName) {
-          const lower = middlewareName.toLowerCase();
-          if (IDORDetector.ADMIN_MIDDLEWARE.has(lower)) { found = true; return; }
-          if (IDORDetector.OWNERSHIP_MIDDLEWARE.has(lower)) { found = true; return; }
+          if (IDORDetector.classifyMiddleware(middlewareName)) { found = true; return; }
         }
       }
     });

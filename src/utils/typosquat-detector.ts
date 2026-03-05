@@ -189,6 +189,13 @@ export function checkTyposquat(packageName: string): {
     return { isTyposquat: false, targetPackage: null, distance: 0, confidence: 'low' };
   }
 
+  // A package that IS in the popular packages list is a legitimate package —
+  // never a typosquat of something else, even if its name is close to another.
+  // e.g., 'pino' (popular logger) must not be flagged as a typosquat of 'sinon'.
+  if (POPULAR_PACKAGES.some(p => p.toLowerCase() === packageName.toLowerCase())) {
+    return { isTyposquat: false, targetPackage: null, distance: 0, confidence: 'low' };
+  }
+
   // Check known attack packages first — guaranteed high confidence
   const knownTarget = KNOWN_ATTACK_PACKAGES.get(packageName.toLowerCase());
   if (knownTarget) {
@@ -216,18 +223,26 @@ export function checkTyposquat(packageName: string): {
     }
   }
 
-  // Determine if it's a typosquat based on edit distance
-  // High confidence: 1-2 character difference
-  // Medium confidence: 3 character difference
-  // Low/no match: 4+ characters
-  if (minDistance <= 2) {
+  // Determine if it's a typosquat based on edit distance.
+  // Use a length-relative threshold: short package names (2-4 chars) naturally
+  // have small absolute distances to many unrelated names. A package like 'ai' has
+  // edit distance 2 from 'chai', but that's 100% of its length — not a typosquat.
+  // Threshold = max(1, min(2, floor(shorter_length × 0.2))), so:
+  //   len 2-4  ('ai', 'bun', 'base2') → threshold 1 — only flag if distance ≤ 1
+  //   len 5-9  ('pino', 'axois')      → threshold 1 — only flag if distance ≤ 1
+  //   len 10+  ('typscript')          → threshold 2 — flag if distance ≤ 2
+  const shorterLen = Math.min(packageName.length, closestPackage?.length ?? packageName.length);
+  const maxTyposquatDistance = Math.max(1, Math.min(2, Math.floor(shorterLen * 0.2)));
+
+  if (minDistance <= maxTyposquatDistance) {
     return {
       isTyposquat: true,
       targetPackage: closestPackage,
       distance: minDistance,
-      confidence: 'high',
+      confidence: minDistance === 1 ? 'high' : 'medium',
     };
-  } else if (minDistance === 3) {
+  } else if (minDistance === maxTyposquatDistance + 1 && maxTyposquatDistance >= 2) {
+    // One step beyond the threshold for longer names: medium confidence
     return {
       isTyposquat: true,
       targetPackage: closestPackage,

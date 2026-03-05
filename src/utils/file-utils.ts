@@ -235,9 +235,50 @@ export function isMigrationFile(filePath: string): boolean {
     /(^|\/)seeders?\//i,
     /\.migration\.(ts|js)$/i,
     /\.seed\.(ts|js)$/i,
+    // Seed files by filename (e.g., routes/seed.js, db/seeder.ts)
+    /[/\\]seeds?(?:er)?s?\.(?:ts|js|mjs|cjs)$/i,
   ];
 
   return migrationPatterns.some(pattern => pattern.test(lowerPath));
+}
+
+/**
+ * Check if a file is a build artifact (minified/bundled output from Vite, webpack, Rollup, etc.)
+ * These files should not be scanned — their single-letter vars and dense code generate false positives.
+ *
+ * Detects two patterns:
+ *   1. Files in known build-output asset directories (public/assets, dist/assets, .next/static, etc.)
+ *   2. Content-hash suffixed filenames — standard bundler output (index-XQYQww37.js, app.a1b2c3d4.js)
+ *
+ * @param filePath - The file path to check
+ * @returns true if the file is a build artifact
+ */
+export function isBuildArtifact(filePath: string): boolean {
+  const normalPath = filePath.replace(/\\/g, '/');
+
+  // Build-output asset directories (Vite, webpack, Next.js, Nuxt, Storybook, etc.)
+  const buildAssetDirPatterns = [
+    /(^|\/)public\/assets\//i,
+    /(^|\/)dist\/assets\//i,
+    /(^|\/)build\/static\//i,
+    /\/.next\/static\//i,
+    /(^|\/)\.nuxt\//i,
+    /(^|\/)\.output\//i,
+    /(^|\/)storybook-static\//i,
+  ];
+
+  if (buildAssetDirPatterns.some(p => p.test(normalPath))) return true;
+
+  // Content-hash suffixed JS/MJS filenames — all major bundlers append a hash:
+  //   Vite:    index-XQYQww37.js     (base62, 8 chars)
+  //   webpack: main.a1b2c3d4.js      (hex, 8 chars)
+  //   Rollup:  chunk-abc12345.mjs    (hex, 8+ chars)
+  //   Parcel:  app.1a2b3c4d5e6f.js   (hex, 12 chars)
+  const baseName = normalPath.split('/').pop() || '';
+  const withoutExt = baseName.replace(/\.(m?js|cjs)$/i, '');
+  if (/[-.]([A-Za-z0-9]{7,})$/.test(withoutExt)) return true;
+
+  return false;
 }
 
 /**
@@ -331,8 +372,13 @@ export function isNodeBuiltin(moduleName: string): boolean {
     'string_decoder', 'sys', 'timers', 'timers/promises', 'tls', 'trace_events',
     'tty', 'url', 'util', 'v8', 'vm', 'wasi', 'worker_threads', 'zlib',
     // Additional Node.js modules
-    'test', 'sea', 'sqlite'
+    'test', 'sea', 'sqlite',
+    // Bun runtime built-in (bun:* protocol and bare 'bun' module)
+    'bun', 'bun:test', 'bun:ffi', 'bun:sqlite', 'bun:wrap',
   ]);
+
+  // Bun uses 'bun:' protocol similarly to Node's 'node:'
+  if (moduleName.startsWith('bun:')) return true;
 
   return NODE_BUILTINS.has(moduleName);
 }

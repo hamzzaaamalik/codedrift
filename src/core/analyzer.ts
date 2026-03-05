@@ -5,6 +5,7 @@ import { clearASTCache } from './ast-parser.js';
 import { getAllEngines } from '../engines/index.js';
 import { loadConfig, isRuleEnabled, getRuleSeverity, meetsConfidenceThreshold } from './config.js';
 import { PackageResolver, GitIgnoreParser, isTestFile } from '../utils/index.js';
+import { isBuildArtifact } from '../utils/file-utils.js';
 import { loadPathAliases } from '../utils/tsconfig-resolver.js';
 import { enrichIssueWithRisk } from './risk-scorer.js';
 import { adjustSeverities } from './severity-adjuster.js';
@@ -94,23 +95,32 @@ export async function analyzeProject(_options: AnalyzeOptions): Promise<Analysis
         },
       };
 
-      // Run all enabled engines in parallel
+      // Run all enabled engines in parallel with per-engine error isolation
       const enginePromises = engines
         .filter(engine => isRuleEnabled(config, engine.name))
         .map(async engine => {
-          const issues = await engine.analyze(context);
+          try {
+            const issues = await engine.analyze(context);
 
-          // Filter out null issues (suppressed by comments)
-          const validIssues = issues.filter((issue): issue is Issue => issue !== null);
+            // Filter out null issues (suppressed by comments)
+            const validIssues = issues.filter((issue): issue is Issue => issue !== null);
 
-          // Apply rule severity overrides
-          return validIssues.map(issue => {
-            const configSeverity = getRuleSeverity(config, engine.name);
-            if (configSeverity) {
-              return { ...issue, severity: configSeverity };
-            }
-            return issue;
-          });
+            // Apply rule severity overrides
+            return validIssues.map(issue => {
+              const configSeverity = getRuleSeverity(config, engine.name);
+              if (configSeverity) {
+                return { ...issue, severity: configSeverity };
+              }
+              return issue;
+            });
+          } catch (engineError) {
+            // Per-engine isolation: one engine crashing doesn't stop others
+            console.warn(
+              `Warning: Engine '${engine.name}' failed on ${filePath}:`,
+              engineError instanceof Error ? engineError.message : engineError,
+            );
+            return [] as Issue[];
+          }
         });
 
       const engineResults = await Promise.all(enginePromises);
@@ -207,6 +217,10 @@ async function discoverFiles(
   if (gitignoreParser) {
     uniqueFiles = uniqueFiles.filter(file => !gitignoreParser.shouldIgnore(file));
   }
+
+  // Always skip build artifacts — minified/bundled files generate only false positives
+  // and are never source code the developer wrote or maintains.
+  uniqueFiles = uniqueFiles.filter(file => !isBuildArtifact(file));
 
   return uniqueFiles;
 }

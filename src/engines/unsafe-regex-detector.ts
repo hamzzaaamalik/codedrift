@@ -37,16 +37,23 @@ export class UnsafeRegexDetector extends BaseEngine {
   private static readonly ESCAPE_FUNCTION_NAMES = new Set([
     'escaperegexp', 'escaperegex', 'escapestringregexp', 'escapestringregex',
     'regexescape', 'regexpescape', 'quotemeta',
+    'sanitizeregex', 'sanitizeregexp', 'sanitizepattern',
+    'escapestr', 'escapestring', 'escapespecialchars', 'escapespecial',
+    'regexpquote', 'quotere', 'quoteregex',
   ]);
 
   /** Trusted (non-attacker-controlled) data sources */
   private static readonly TRUSTED_SOURCE_PATTERNS = [
     /^process\.env\./,
-    /^config\./,
+    /^config(?:Manager)?\./,
     /^settings\./,
     /^constants?\./i,
     /^options\./,
     /^ENV\./,
+    /^APP\./,
+    /\.(?:constants?|PATTERNS?|REGEXES?|SCHEMAS?)\b/i,
+    /^this\.(?:config|options|settings|pattern)/i,
+    /^(?:DEFAULT|STATIC|GLOBAL)_/,
   ];
 
   /** Methods that produce bounded-length output — regex on their result is lower risk */
@@ -145,12 +152,43 @@ export class UnsafeRegexDetector extends BaseEngine {
     const isSafe = safeRegex(pattern);
 
     if (!isSafe) {
-      // Disjoint-delimiter guard: patterns like \d+(\.\d+)? are safe because
-      // the delimiter (\.) prevents catastrophic backtracking even though
-      // safe-regex2 flags the nested quantifier. Skip if every quantified group
-      // starts with a delimiter disjoint from the preceding character class.
-      if (!this.hasDisjointDelimiters(pattern)) {
-        const severity = this.getStaticReDoSSeverity(node, context);
+      // safe-regex2 is conservative — it flags any star-height > 1, even safe
+      // patterns like (\d+)? (optional group with inner quantifier).
+      // Apply structural analysis to filter false positives.
+
+      // Guard 1: If all nested quantifiers use ? or {n} as outer quantifier,
+      // the pattern is safe. (X+)? matches 0 or 1 times — no exponential backtracking.
+      // (X+){3} is bounded — at most 3 iterations.
+      if (this.allNestedQuantifiersAreBounded(pattern)) {
+        // Safe — skip
+      }
+      // Guard 2: Disjoint-delimiter guard — patterns like \d+(\.\d+)+ are safe
+      // because the delimiter (\.) prevents catastrophic backtracking.
+      else if (this.hasDisjointDelimiters(pattern)) {
+        // Safe — skip
+      }
+      // Guard 3: Literal-anchor-in-group guard — groups containing a mandatory
+      // literal character (like \r?\n, /, :) that cannot match the repeating body.
+      // e.g., (?:[ \t]*\r?\n)+ — each iteration MUST consume a newline, preventing
+      // catastrophic backtracking even though category-level analysis is too coarse.
+      else if (this.hasLiteralAnchorInGroups(pattern)) {
+        // Safe — skip
+      }
+      // Guard 4: Fully-anchored pattern — patterns with both ^ and $ anchors are safe
+      // because the engine can only start matching at position 0, eliminating the
+      // exponential backtracking that arises from trying multiple start positions.
+      // e.g., /^~?(\/[^\s]+)+$/ — safe because no alternative starting positions.
+      else if (this.isFullyAnchored(pattern)) {
+        // Safe — skip
+      }
+      else {
+        let severity = this.getStaticReDoSSeverity(node, context);
+        // Complexity-based demotion: simple patterns with shallow quantifier
+        // nesting (< 2 levels) pose minimal real-world ReDoS risk. Demote to
+        // 'warning' unless they're on user input (which stays 'error').
+        if (severity === 'error' && this.isSimplePattern(pattern) && !this.regexAppliesToUserInput(node)) {
+          severity = 'warning';
+        }
         return this.createIssue(
           context,
           node,
@@ -259,6 +297,11 @@ export class UnsafeRegexDetector extends BaseEngine {
       if (this.isFunctionLike(current)) {
         const funcNode = current as ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration;
         if (funcNode.parameters && funcNode.parameters.length >= 1) {
+          // Skip middleware functions (3+ params with 'next' as last) — they're helpers, not endpoints
+          const hasNextParam = funcNode.parameters.length >= 3 &&
+            funcNode.parameters.some(p => ts.isIdentifier(p.name) && p.name.text.toLowerCase() === 'next');
+          if (hasNextParam) return false;
+
           const firstParam = funcNode.parameters[0];
           if (ts.isIdentifier(firstParam.name)) {
             const firstName = firstParam.name.text.toLowerCase();
@@ -444,9 +487,26 @@ export class UnsafeRegexDetector extends BaseEngine {
       }
     }
 
-    // Check (a?)+ pattern — optional in quantified group
+    // Check (a?)+ pattern — fully-optional content in quantified group.
+    // Only flag when ALL elements in the group are optional (can match empty).
+    // e.g., (a?)+ is dangerous, but (\r?\n)+ is safe because \n is mandatory.
     if (/\([^()]*\?\)[+*]/.test(pattern)) {
-      return true;
+      const optGroupRegex = /\(([^()]*\?)\)[+*]/g;
+      let gm;
+      while ((gm = optGroupRegex.exec(pattern)) !== null) {
+        const groupContent = gm[1];
+        // Strip non-capturing prefix
+        const content = groupContent.startsWith('?:') ? groupContent.slice(2) : groupContent;
+        // Check if every element in the group is optional (has ? quantifier)
+        // Remove escape sequences and check if there are mandatory elements
+        const stripped = content.replace(/\\./g, 'X'); // normalize escapes
+        // If after removing all X? patterns, nothing mandatory remains → dangerous
+        const withoutOptional = stripped.replace(/X\?/g, '').replace(/.\?/g, '').replace(/\[[^\]]*\]\?/g, '');
+        const mandatory = withoutOptional.replace(/[+*?|]/g, '').trim();
+        if (mandatory.length === 0) {
+          return true; // All elements optional → can match empty → dangerous
+        }
+      }
     }
 
     return false;
@@ -480,23 +540,43 @@ export class UnsafeRegexDetector extends BaseEngine {
    */
   private hasQuantifiedOverlap(pattern: string): boolean {
     // Pattern: quantified_class quantified_class $ (end anchor)
-    // Where the classes overlap
-    const endAnchorPatterns = [
-      // \w+\d+$ — \d is subset of \w
-      /\\w[+*].*\\d[+*].*\$/,
+    // Where the classes overlap AND no literal delimiter separates them.
+    const endAnchorPatterns: Array<{ regex: RegExp; gapGroup: number }> = [
+      // \w+\d+$ — \d is subset of \w. Capture gap between quantifiers.
+      { regex: /\\w[+*]((?:[^\\$]|\\.)*)\\d[+*].*\$/, gapGroup: 1 },
       // .*[a-z]+$ — . includes [a-z]
-      /\.\*.*\[[a-z]/i,
+      { regex: /\.\*((?:[^\\$[\]]|\\.)*)\[[a-z][^\]]*\][+*].*\$/i, gapGroup: 1 },
       // .*\w+$
-      /\.\*.*\\w[+*].*\$/,
+      { regex: /\.\*((?:[^\\$]|\\.)*)\\w[+*].*\$/, gapGroup: 1 },
       // \w+[a-z]+$ or similar overlapping
-      /\\w[+*].*\[a-z[^\]]*\][+*].*\$/i,
+      { regex: /\\w[+*]((?:[^\\$[]|\\.)*)\[a-z[^\]]*\][+*].*\$/i, gapGroup: 1 },
     ];
 
-    for (const p of endAnchorPatterns) {
-      if (p.test(pattern)) return true;
+    for (const { regex, gapGroup } of endAnchorPatterns) {
+      const m = regex.exec(pattern);
+      if (m) {
+        const gap = m[gapGroup] || '';
+        // If there's a literal string between the quantified groups, it acts as a
+        // delimiter preventing catastrophic backtracking (e.g., \w+end\d+$)
+        if (this.hasLiteralDelimiterInGap(gap)) continue;
+        return true;
+      }
     }
 
     return false;
+  }
+
+  /**
+   * Check if a gap string between quantified groups contains a literal delimiter.
+   * Literal characters (not escape classes like \w, \d) prevent backtracking overlap.
+   */
+  private hasLiteralDelimiterInGap(gap: string): boolean {
+    if (!gap || gap.length === 0) return false;
+    // Strip escape sequences to find literal characters
+    const withoutEscapes = gap.replace(/\\[dDwWsS.bB]/g, '');
+    // If any literal characters remain (not just escape classes), it's a delimiter
+    const literals = withoutEscapes.replace(/\\/g, '');
+    return literals.length > 0;
   }
 
   // ──────────── Path B: Dynamic Regex Injection ────────────
@@ -571,6 +651,11 @@ export class UnsafeRegexDetector extends BaseEngine {
     if (ts.isTemplateExpression(patternArg)) {
       for (const span of patternArg.templateSpans) {
         const expr = span.expression;
+        // Check if the expression is an inline .replace() escape call
+        if (ts.isCallExpression(expr) && ts.isPropertyAccessExpression(expr.expression) &&
+            expr.expression.name.text === 'replace' && this.isInlineEscapeReplace(expr)) {
+          continue; // Safe — escaped inline
+        }
         if (this.isUserInputExpression(expr) && !this.isEscapedExpression(expr)) {
           return this.createIssue(
             context, node,
@@ -820,8 +905,9 @@ export class UnsafeRegexDetector extends BaseEngine {
       return true;
     }
 
-    // Check for names containing "escape" + "regex"
-    if (funcName && /escape.*reg/i.test(funcName)) return true;
+    // Check for names containing "escape" + "regex" or "sanitize" + "regex/pattern"
+    if (funcName && (/escape.*reg/i.test(funcName) || /sanitize.*(?:reg|pattern)/i.test(funcName) ||
+        /(?:regex|regexp).*(?:escape|sanitize|quote)/i.test(funcName))) return true;
 
     return false;
   }
@@ -899,19 +985,28 @@ export class UnsafeRegexDetector extends BaseEngine {
       if (!firstElem) return false;
 
       const precElem = this.extractPrecedingRegexElement(pattern, group.startIndex);
-      if (!precElem) return false;
 
-      if (!this.elementsAreDisjoint(firstElem, precElem)) return false;
+      if (precElem) {
+        // Normal case: check delimiter disjointness with preceding element
+        if (!this.elementsAreDisjoint(firstElem, precElem)) return false;
+      } else {
+        // Anchor case (^ at start): no preceding matchable element.
+        // Check if the group has an internal delimiter — the LAST element in the
+        // group content is disjoint from the repeating body (first element).
+        // e.g., (\w+\.) → last=\., first=\w → disjoint → safe (dot terminates each repetition)
+        const lastElem = this.extractLastRegexElement(group.content);
+        if (!lastElem || !this.elementsAreDisjoint(firstElem, lastElem)) return false;
+      }
     }
     return true;
   }
 
   /**
    * Find all top-level quantified groups: (...)+, (...)*, (...)?
-   * Returns content (without parens) and start index of each.
+   * Returns content (without parens), start index, and outer quantifier of each.
    */
-  private findQuantifiedGroups(pattern: string): Array<{ content: string; startIndex: number }> {
-    const groups: Array<{ content: string; startIndex: number }> = [];
+  private findQuantifiedGroups(pattern: string): Array<{ content: string; startIndex: number; outerQuantifier: string }> {
+    const groups: Array<{ content: string; startIndex: number; outerQuantifier: string }> = [];
     let i = 0;
 
     while (i < pattern.length) {
@@ -937,15 +1032,24 @@ export class UnsafeRegexDetector extends BaseEngine {
           i++;
         }
 
-        // i is past the closing ). Check if followed by quantifier.
+        // i is past the closing ). Check if followed by quantifier (+, *, ?, {n,m}).
+        const closeParenIdx = i - 1; // position of ')'
         if (i < pattern.length && /[+*?{]/.test(pattern[i])) {
-          let content = pattern.substring(start + 1, i - 1);
+          // Skip past {n,m} quantifier so 'i' ends after it
+          let quantifierStr = pattern[i];
+          if (pattern[i] === '{') {
+            const braceStart = i;
+            while (i < pattern.length && pattern[i] !== '}') i++;
+            if (i < pattern.length) i++;
+            quantifierStr = pattern.substring(braceStart, i);
+          }
+          let content = pattern.substring(start + 1, closeParenIdx);
           // Strip non-capturing/named group prefix
           if (content.startsWith('?:')) content = content.substring(2);
           else if (content.startsWith('?<') && content.includes('>')) {
             content = content.substring(content.indexOf('>') + 1);
           }
-          groups.push({ content, startIndex: start });
+          groups.push({ content, startIndex: start, outerQuantifier: quantifierStr });
         }
         continue;
       }
@@ -953,6 +1057,195 @@ export class UnsafeRegexDetector extends BaseEngine {
       i++;
     }
     return groups;
+  }
+
+  /**
+   * Check if all nested quantifier structures in the pattern are bounded.
+   * (X+)? is safe (0 or 1 occurrence). (X+){3} is safe (exactly 3).
+   * Only (X+)+ and (X+)* are dangerous (unbounded repetition).
+   */
+  private allNestedQuantifiersAreBounded(pattern: string): boolean {
+    const groups = this.findQuantifiedGroups(pattern);
+    if (groups.length === 0) return true; // No quantified groups at all
+
+    // Check if any group has an inner quantifier AND an unbounded outer quantifier
+    for (const group of groups) {
+      const hasInnerQuantifier = /[+*]/.test(group.content.replace(/\\./g, '').replace(/\[[^\]]*\]/g, ''));
+      if (!hasInnerQuantifier) continue; // No inner quantifier — not nested
+
+      // Outer quantifier: ? is bounded, {n} is bounded, + and * are unbounded
+      const outer = group.outerQuantifier;
+      if (outer === '?' ) continue; // (X+)? → bounded (0 or 1)
+      if (outer.startsWith('{')) {
+        // {n} or {n,m} — check if m is small (bounded)
+        const match = outer.match(/^\{(\d+)(?:,(\d*))?\}$/);
+        if (match) {
+          const max = match[2] !== undefined ? (match[2] === '' ? Infinity : parseInt(match[2], 10)) : parseInt(match[1], 10);
+          if (max <= 10) continue; // Bounded repetition — safe
+        }
+      }
+      // outer is + or * or {n,} — unbounded, check if inner is truly quantified
+      return false;
+    }
+    return true; // All nested quantifiers are bounded
+  }
+
+  /**
+   * Guard 3: Check if every quantified group with unbounded outer quantifier
+   * contains a mandatory literal character that cannot be matched by adjacent
+   * character classes, preventing catastrophic backtracking.
+   *
+   * This handles cases where the category-level disjointness check (Guard 2)
+   * is too coarse. For example:
+   *   (?:[ \t]*\r?\n)+ — \n is mandatory, and [ \t] can't match \n
+   *   (?::[a-z0-9]+)+  — : is mandatory, and [a-z0-9] can't match :
+   *   (?:\/[^\s]+)+    — / is mandatory literal at start of each iteration
+   */
+  /**
+   * Check if the pattern is fully anchored with both ^ and $.
+   * Fully-anchored patterns prevent the regex engine from trying multiple
+   * starting positions, which is a prerequisite for catastrophic backtracking
+   * in most ReDoS scenarios.
+   */
+  private isFullyAnchored(pattern: string): boolean {
+    // Must start with ^ (after optional non-capturing group or flags)
+    // and end with $ (before optional flags)
+    const stripped = pattern.replace(/^\(\?[a-z]+\)/, ''); // strip inline flags
+    return stripped.startsWith('^') && /\$(?:\)*)$/.test(stripped);
+  }
+
+  private hasLiteralAnchorInGroups(pattern: string): boolean {
+    const groups = this.findQuantifiedGroups(pattern);
+    if (groups.length === 0) return false;
+
+    for (const group of groups) {
+      // Only check groups with inner quantifiers (the ones safe-regex2 flags)
+      const contentStripped = group.content.replace(/\\./g, '').replace(/\[[^\]]*\]/g, '');
+      const hasInnerQuantifier = /[+*]/.test(contentStripped);
+      if (!hasInnerQuantifier) continue;
+
+      // Check if this group has an unbounded outer quantifier
+      const outer = group.outerQuantifier;
+      if (outer === '?') continue; // bounded
+      if (outer.startsWith('{')) {
+        const match = outer.match(/^\{(\d+)(?:,(\d*))?\}$/);
+        if (match) {
+          const max = match[2] !== undefined ? (match[2] === '' ? Infinity : parseInt(match[2], 10)) : parseInt(match[1], 10);
+          if (max <= 10) continue;
+        }
+      }
+
+      // This group has inner quantifier + unbounded outer. Check for mandatory literal.
+      if (!this.groupHasMandatoryLiteralAnchor(group.content, pattern, group.startIndex)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Check if a quantified group's content contains a mandatory literal element
+   * that can't be consumed by the adjacent repeating body, acting as an anchor
+   * that prevents catastrophic backtracking.
+   */
+  private groupHasMandatoryLiteralAnchor(content: string, _fullPattern: string, _groupStart: number): boolean {
+    // Parse the group content into elements, checking for mandatory literals
+    // A "mandatory literal" is a non-optional element that matches a specific character
+    // which cannot be matched by the quantified parts of the group.
+
+    // Strategy: Extract all non-quantified literal/escape elements and check
+    // if any of them are NOT matchable by the quantified character classes in the group.
+
+    // Step 1: Find all character classes used with quantifiers in the group
+    const quantifiedClasses = new Set<string>();
+    const classRegex = /(\[[^\]]*\]|\\[dDwWsS]|\.)[+*?]|\b([+*?])/g;
+    let m;
+    while ((m = classRegex.exec(content)) !== null) {
+      if (m[1]) quantifiedClasses.add(m[1]);
+    }
+
+    // Step 2: Find mandatory literals (not followed by ? and not inside quantified groups)
+    // Simple approach: look for literal chars or escape sequences not followed by ?, +, *
+    const elements: string[] = [];
+    let i = 0;
+    while (i < content.length) {
+      if (content[i] === '\\' && i + 1 < content.length) {
+        const esc = content.substring(i, i + 2);
+        i += 2;
+        // Skip if followed by quantifier making it optional
+        if (i < content.length && content[i] === '?') { i++; continue; }
+        if (i < content.length && (content[i] === '+' || content[i] === '*')) { i++; continue; }
+        elements.push(esc);
+        continue;
+      }
+      if (content[i] === '[') {
+        const end = this.findClosingBracket(content, i);
+        if (end !== -1) {
+          const cls = content.substring(i, end + 1);
+          i = end + 1;
+          if (i < content.length && content[i] === '?') { i++; continue; }
+          if (i < content.length && (content[i] === '+' || content[i] === '*')) { i++; continue; }
+          elements.push(cls);
+          continue;
+        }
+      }
+      if (content[i] === '(' || content[i] === ')' || content[i] === '|' ||
+          content[i] === '+' || content[i] === '*' || content[i] === '?' ||
+          content[i] === '{' || content[i] === '}') {
+        i++;
+        continue;
+      }
+      // Literal character
+      const ch = content[i];
+      i++;
+      if (i < content.length && (content[i] === '?' || content[i] === '+' || content[i] === '*')) { i++; continue; }
+      elements.push(ch);
+    }
+
+    // Step 3: Check if any mandatory element is NOT matchable by the quantified classes
+    for (const elem of elements) {
+      const elemCats = this.getCharCategories(elem);
+      if (!elemCats || elemCats.has('any')) continue;
+
+      // Check against each quantified class
+      let matchedByAnyQuantified = false;
+      for (const qClass of quantifiedClasses) {
+        const qCats = this.getCharCategories(qClass);
+        if (!qCats) continue;
+        if (qCats.has('any')) { matchedByAnyQuantified = true; break; }
+        for (const cat of elemCats) {
+          if (qCats.has(cat)) { matchedByAnyQuantified = true; break; }
+        }
+        if (matchedByAnyQuantified) break;
+      }
+
+      if (!matchedByAnyQuantified) {
+        return true; // Found a mandatory literal that can't be consumed by quantified parts
+      }
+    }
+
+    // Special case: check for \r?\n pattern (newline mandatory, \r optional)
+    // \n (newline) is not in the whitespace matched by [ \t]
+    if (/\\r\?\\n/.test(content) || /\\n/.test(content)) {
+      // Check if any quantified class can match \n
+      let newlineMatchable = false;
+      for (const qClass of quantifiedClasses) {
+        // \n is NOT matched by [ \t], \w, \d — only by \s, ., [^\S] etc.
+        if (qClass === '.' || qClass === '\\s' || qClass === '\\S') {
+          newlineMatchable = true; break;
+        }
+        if (qClass.startsWith('[') && qClass.endsWith(']')) {
+          const inner = qClass.slice(1, -1);
+          if (inner.includes('\\n') || inner.includes('\\s')) {
+            newlineMatchable = true; break;
+          }
+          // [ \t] does NOT match \n
+        }
+      }
+      if (!newlineMatchable) return true;
+    }
+
+    return false;
   }
 
   /**
@@ -976,6 +1269,51 @@ export class UnsafeRegexDetector extends BaseEngine {
 
     // Literal character
     return content[0];
+  }
+
+  /**
+   * Extract the last regex element from a group's content string.
+   * For (\w+\.) returns \., for (\w+[-]) returns [-], for (\w+x) returns x.
+   * Strips trailing quantifiers to get the base element.
+   */
+  private extractLastRegexElement(content: string): string | null {
+    if (!content || content.length === 0) return null;
+
+    let p = content.length - 1;
+
+    // Strip trailing quantifiers
+    while (p >= 0) {
+      if (content[p] === '+' || content[p] === '*' || content[p] === '?') {
+        p--;
+      } else if (content[p] === '}') {
+        const braceStart = content.lastIndexOf('{', p);
+        if (braceStart >= 0) { p = braceStart - 1; } else { break; }
+      } else {
+        break;
+      }
+    }
+    if (p < 0) return null;
+
+    // Character class: ]...[
+    if (content[p] === ']') {
+      let j = p - 1;
+      while (j >= 0) {
+        if (content[j] === '[' && (j === 0 || content[j - 1] !== '\\')) {
+          return content.substring(j, p + 1);
+        }
+        if (content[j] === '\\' && j > 0) { j -= 2; continue; }
+        j--;
+      }
+      return null;
+    }
+
+    // Escape sequence: \d, \w, \., etc.
+    if (p >= 1 && content[p - 1] === '\\') {
+      return content.substring(p - 1, p + 1);
+    }
+
+    // Literal character
+    return content[p];
   }
 
   /**
@@ -1169,6 +1507,116 @@ export class UnsafeRegexDetector extends BaseEngine {
       i++;
     }
     return -1;
+  }
+
+  // ──────────── Complexity Analysis ────────────
+
+  /**
+   * Measure quantifier nesting depth in a regex pattern.
+   * Returns the maximum depth of nested quantifiers (e.g., (a+)+ = 2, \d+ = 1).
+   * Used to demote simple patterns with shallow nesting to 'warning'.
+   */
+  private getQuantifierNestingDepth(pattern: string): number {
+    let maxDepth = 0;
+    let currentGroupDepth = 0;
+    let inCharClass = false;
+    let i = 0;
+
+    while (i < pattern.length) {
+      const ch = pattern[i];
+
+      // Skip escaped characters
+      if (ch === '\\' && i + 1 < pattern.length) {
+        i += 2;
+        continue;
+      }
+
+      if (ch === '[') { inCharClass = true; i++; continue; }
+      if (ch === ']') { inCharClass = false; i++; continue; }
+      if (inCharClass) { i++; continue; }
+
+      if (ch === '(') {
+        currentGroupDepth++;
+        i++;
+        continue;
+      }
+
+      if (ch === ')') {
+        // Check if this group is followed by a quantifier
+        const next = i + 1 < pattern.length ? pattern[i + 1] : '';
+        if (next === '+' || next === '*' || next === '{') {
+          // This group has a quantifier — check if it contains quantifiers inside
+          const innerDepth = this.countInnerQuantifiers(pattern, i);
+          maxDepth = Math.max(maxDepth, innerDepth + 1);
+        }
+        currentGroupDepth = Math.max(0, currentGroupDepth - 1);
+        i++;
+        continue;
+      }
+
+      // Standalone quantifiers (on atoms, not groups)
+      if ((ch === '+' || ch === '*') && i > 0) {
+        maxDepth = Math.max(maxDepth, 1);
+      }
+
+      i++;
+    }
+
+    return maxDepth;
+  }
+
+  /**
+   * Count the maximum quantifier depth inside a group ending at `closeParenIdx`.
+   */
+  private countInnerQuantifiers(pattern: string, closeParenIdx: number): number {
+    // Walk backwards to find the matching open paren
+    let depth = 0;
+    let openIdx = closeParenIdx - 1;
+    let inCC = false;
+
+    while (openIdx >= 0) {
+      const ch = pattern[openIdx];
+      // Simple backward scan — not perfect with escapes but good enough
+      if (ch === ']') { inCC = true; openIdx--; continue; }
+      if (ch === '[') { inCC = false; openIdx--; continue; }
+      if (inCC) { openIdx--; continue; }
+      if (ch === ')') { depth++; openIdx--; continue; }
+      if (ch === '(') {
+        if (depth === 0) break;
+        depth--;
+        openIdx--;
+        continue;
+      }
+      openIdx--;
+    }
+
+    // Now check the substring inside the group for quantifiers
+    const inner = pattern.substring(openIdx + 1, closeParenIdx);
+    let hasQuantifier = false;
+    let innerInCC = false;
+    for (let j = 0; j < inner.length; j++) {
+      if (inner[j] === '\\' && j + 1 < inner.length) { j++; continue; }
+      if (inner[j] === '[') { innerInCC = true; continue; }
+      if (inner[j] === ']') { innerInCC = false; continue; }
+      if (innerInCC) continue;
+      if (inner[j] === '+' || inner[j] === '*') {
+        hasQuantifier = true;
+        break;
+      }
+    }
+
+    return hasQuantifier ? 1 : 0;
+  }
+
+  /**
+   * Check if a pattern is "simple" — shallow nesting and short length.
+   * Simple patterns pose minimal real-world ReDoS risk.
+   */
+  private isSimplePattern(pattern: string): boolean {
+    const nestingDepth = this.getQuantifierNestingDepth(pattern);
+    // Patterns with < 2 levels of quantifier nesting are simple
+    // e.g., \d+ (depth 1) is simple, (a+)+ (depth 2) is not
+    return nestingDepth < 2 && pattern.length < 60;
   }
 
   // ──────────── Utility ────────────

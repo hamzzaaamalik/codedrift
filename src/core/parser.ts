@@ -148,16 +148,20 @@ export function isWithinNodeType(
 export function getImports(sourceFile: ts.SourceFile): {
   moduleName: string;
   location: { line: number; column: number };
+  isTypeOnly: boolean;
 }[] {
-  const imports: { moduleName: string; location: { line: number; column: number } }[] = [];
+  const imports: { moduleName: string; location: { line: number; column: number }; isTypeOnly: boolean }[] = [];
 
   traverse(sourceFile, (node) => {
     if (ts.isImportDeclaration(node)) {
       const moduleSpecifier = node.moduleSpecifier;
       if (ts.isStringLiteral(moduleSpecifier)) {
+        // import type { ... } from 'module' — type-only imports are erased at compile time
+        const isTypeOnly = node.importClause?.isTypeOnly === true;
         imports.push({
           moduleName: moduleSpecifier.text,
           location: getLocation(node, sourceFile),
+          isTypeOnly,
         });
       }
     }
@@ -175,6 +179,7 @@ export function getImports(sourceFile: ts.SourceFile): {
           imports.push({
             moduleName: arg.text,
             location: getLocation(node, sourceFile),
+            isTypeOnly: false,
           });
         }
       }

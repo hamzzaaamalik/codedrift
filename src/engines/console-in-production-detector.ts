@@ -40,9 +40,11 @@ export class ConsoleInProductionDetector extends BaseEngine {
       if (ts.isCallExpression(node)) {
         const issue = this.checkConsoleCall(node, context);
         if (issue) {
-          // If the file uses a proper logger, only keep findings about sensitive data —
-          // non-sensitive console calls in logger-adjacent files are likely intentional
-          if (hasLoggerImport && issue.confidence !== 'high') {
+          // If the file uses a proper logger, suppress only LOW-confidence findings.
+          // HIGH: sensitive data logging — always report.
+          // MEDIUM: console in route handlers — still worth flagging even with a logger.
+          // LOW: generic console.log in regular code — likely intentional alongside logger.
+          if (hasLoggerImport && issue.confidence === 'low') {
             return;
           }
           issues.push(issue);
@@ -108,6 +110,12 @@ export class ConsoleInProductionDetector extends BaseEngine {
 
     // Check if this console call is inside a logger/transport class implementation
     if (this.isInsideLoggerClass(node)) {
+      return null;
+    }
+
+    // Respect eslint-disable comments — if the developer explicitly disabled no-console,
+    // they've made a conscious decision to keep this console call
+    if (this.hasEslintDisableComment(node, context)) {
       return null;
     }
 
@@ -233,6 +241,9 @@ export class ConsoleInProductionDetector extends BaseEngine {
       return true; // Config/build files legitimately use console for output
     }
 
+    // Normalize to forward slashes for cross-platform regex matching
+    const normalPath = filePath.replace(/\\/g, '/');
+
     const devPatterns = [
       /\/dev\//,
       /\/debug\//,
@@ -245,9 +256,12 @@ export class ConsoleInProductionDetector extends BaseEngine {
       /log\.ts$/,
       /\/seed\//,     // Seed scripts
       /\/setup\//,    // Setup scripts
+      /\/evals?\//,   // Eval / benchmark / nightly test scripts — never production
+      /\/bench(?:marks?)?\//,
+      /\/fixtures?\//,
     ];
 
-    return devPatterns.some(pattern => pattern.test(filePath));
+    return devPatterns.some(pattern => pattern.test(normalPath));
   }
 
   /**
@@ -277,21 +291,23 @@ export class ConsoleInProductionDetector extends BaseEngine {
    * Check if condition is checking for development environment
    */
   private isDevelopmentCondition(node: ts.Expression): boolean {
-    // Simple check: process.env.NODE_ENV === 'development'
-    if (ts.isBinaryExpression(node)) {
-      const text = node.getText();
-      const devPatterns = [
-        /NODE_ENV.*===.*['"]development['"]/,
-        /NODE_ENV.*===.*['"]dev['"]/,
-        /isDevelopment/,
-        /isDebug/,
-        /__DEV__/,
-        // DEBUG env var is a common pattern alongside NODE_ENV
-        /process\.env\.DEBUG/,
-        /process\.env\.VERBOSE/,
-      ];
+    const text = node.getText();
 
-      return devPatterns.some(pattern => pattern.test(text));
+    // Check for debug/development keywords in the full condition text.
+    // Catches: process.env.NODE_ENV === 'development', process.env.DEBUG,
+    // isTruthyEnvValue(process.env.OPENCLAW_DEBUG_HEALTH), isDebug, __DEV__, etc.
+    const devPatterns = [
+      /NODE_ENV.*===.*['"]development['"]/,
+      /NODE_ENV.*===.*['"]dev['"]/,
+      /isDevelopment/,
+      /isDebug/,
+      /__DEV__/,
+      /process\.env\.[A-Z_]*DEBUG/,
+      /process\.env\.[A-Z_]*VERBOSE/,
+    ];
+
+    if (devPatterns.some(pattern => pattern.test(text))) {
+      return true;
     }
 
     // Check for direct flag: if (isDevelopment) { ... } or if (DEBUG) { ... }
@@ -328,17 +344,29 @@ export class ConsoleInProductionDetector extends BaseEngine {
         }
 
         if (className) {
-          const loggerClassPatterns = /logger|logging|transport|winston|pino|bunyan|log4/i;
+          const loggerClassPatterns = /logger|logging|transport|winston|pino|bunyan|log4|appender|handler|stream|writer|sink|reporter/i;
           if (loggerClassPatterns.test(className)) {
             return true;
           }
+        }
+
+        // Also check: class with 1+ log-level method AND the class name doesn't suggest a service/controller
+        const classMembers = (current as ts.ClassDeclaration | ts.ClassExpression).members;
+        const logLevelNames = ['log', 'warn', 'error', 'info', 'debug', 'trace', 'fatal', 'verbose', 'write'];
+        const logMethodCount = classMembers.filter((m: ts.ClassElement) =>
+          ts.isMethodDeclaration(m) && ts.isIdentifier(m.name) &&
+          logLevelNames.includes(m.name.text.toLowerCase())
+        ).length;
+        // Single log method is enough if the class name suggests it's a logger/transport
+        if (logMethodCount >= 1 && className && /transport|appender|sink|writer|stream|handler/i.test(className)) {
+          return true;
         }
       }
 
       // Check if inside a method whose name is a standard log level
       if (ts.isMethodDeclaration(current) && ts.isIdentifier(current.name)) {
         const methodName = current.name.text.toLowerCase();
-        const logLevelMethods = ['log', 'warn', 'error', 'info', 'debug', 'trace', 'fatal', 'verbose'];
+        const logLevelMethods = ['log', 'warn', 'error', 'info', 'debug', 'trace', 'fatal', 'verbose', 'write'];
 
         if (logLevelMethods.includes(methodName)) {
           // Only skip if it's inside a class that has multiple log methods (logger pattern)
@@ -364,6 +392,121 @@ export class ConsoleInProductionDetector extends BaseEngine {
   }
 
   /**
+   * Check if a console call has an eslint-disable comment for no-console.
+   * If developers explicitly suppressed the lint rule, they've acknowledged this console usage.
+   */
+  private hasEslintDisableComment(node: ts.Node, context: AnalysisContext): boolean {
+    const sourceFile = context.sourceFile;
+    const nodeStart = node.getStart(sourceFile);
+    const lineNumber = sourceFile.getLineAndCharacterOfPosition(nodeStart).line;
+
+    // Check the line above for eslint-disable-next-line
+    if (lineNumber > 0) {
+      const prevLineStart = sourceFile.getLineStarts()[lineNumber - 1];
+      const prevLineEnd = sourceFile.getLineStarts()[lineNumber] || sourceFile.getEnd();
+      const prevLineText = sourceFile.text.substring(prevLineStart, prevLineEnd);
+      if (/eslint-disable(?:-next-line)?.*no-console/.test(prevLineText)) {
+        return true;
+      }
+    }
+
+    // Check same line for inline eslint-disable
+    const lineStart = sourceFile.getLineStarts()[lineNumber];
+    const lineEnd = sourceFile.getLineStarts()[lineNumber + 1] || sourceFile.getEnd();
+    const lineText = sourceFile.text.substring(lineStart, lineEnd);
+    if (/eslint-disable(?:-line)?.*no-console/.test(lineText)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if a keyword appears at a logical identifier boundary in text.
+   * Uses the original (non-lowercased) text to correctly detect camelCase transitions.
+   *
+   * Matches: password, user_password, getPassword, this.password, PASSWORD_HASH
+   * Does NOT match: pin in typing, health in unhealthy
+   */
+  private hasKeywordAtBoundary(text: string, keyword: string): boolean {
+    const lower = keyword.toLowerCase();
+    const capitalized = keyword.charAt(0).toUpperCase() + keyword.slice(1).toLowerCase();
+    const upper = keyword.toUpperCase();
+
+    // Pattern 1: lowercase keyword preceded by non-letter or start, followed by non-lowercase or end
+    // Handles: password, user_password, .password, (password), password_hash, "password"
+    if (new RegExp(`(?:^|[^a-zA-Z])${lower}(?:[^a-z]|$)`).test(text)) return true;
+
+    // Pattern 2: capitalized keyword preceded by a lowercase letter (camelCase transition)
+    // Handles: getPassword, checkHealth, mySession
+    if (new RegExp(`[a-z]${capitalized}`).test(text)) return true;
+
+    // Pattern 3: SCREAMING_SNAKE_CASE
+    // Handles: DB_PASSWORD, API_TOKEN
+    if (new RegExp(`(?:^|[^a-zA-Z])${upper}(?:[^a-zA-Z]|$)`).test(text)) return true;
+
+    return false;
+  }
+
+  /**
+   * Returns true if the sensitive keyword appears only as a functional modifier prefix
+   * in an identifier, rather than being the primary data concept itself.
+   *
+   * Splits the identifier into camelCase / snake_case words. If the keyword is NOT the
+   * final word AND every subsequent word is an "operational qualifier" (manager, service,
+   * check, etc.), the identifier describes functionality AROUND the concept — not the
+   * sensitive data value itself — so it should not be flagged.
+   *
+   * Examples:
+   *   sessionManager → ['session', 'manager'] → 'session' prefix, 'manager' operational → non-sensitive
+   *   healthCheck    → ['health',  'check']   → 'health'  prefix, 'check'   operational → non-sensitive
+   *   authService    → ['auth',    'service'] → 'auth'    prefix, 'service' operational → non-sensitive
+   *   userPassword   → ['user',    'password']→ 'password' is LAST word                → sensitive
+   *   sessionToken   → ['session', 'token']   → 'token' is LAST word                   → sensitive
+   */
+  private isKeywordInNonSensitiveContext(identifier: string, keyword: string): boolean {
+    // Normalise the identifier into lowercase words by splitting at camelCase and
+    // underscore / hyphen / dot boundaries.
+    const words = identifier
+      .replace(/([a-z])([A-Z])/g, '$1_$2')  // camelCase → snake_case
+      .toLowerCase()
+      .split(/[_\-.\s]+/)
+      .filter(w => w.length > 0);
+
+    const keywordLower = keyword.toLowerCase();
+
+    // Require an exact word match (not a sub-string of a longer word).
+    const keywordIndex = words.indexOf(keywordLower);
+    if (keywordIndex === -1) return false;
+
+    // If the keyword IS the last word, the identifier represents the data itself.
+    if (keywordIndex === words.length - 1) return false;
+
+    // Keyword is a non-final word. Every subsequent word must be a purely operational
+    // qualifier that signals infrastructure / functionality rather than a data value.
+    const operationalQualifiers = new Set([
+      // Architecture / DI
+      'manager', 'service', 'handler', 'middleware', 'provider', 'factory',
+      'builder', 'resolver', 'registry', 'repository', 'controller', 'adapter',
+      // Configuration
+      'config', 'options', 'settings', 'policy', 'rules',
+      // Behavioural type descriptors (not data values)
+      'type', 'kind', 'scheme', 'method', 'mode', 'strategy',
+      // Monitoring / health
+      'check', 'status', 'monitor', 'ping', 'metric', 'endpoint',
+      // Counting / sizing
+      'count', 'index', 'size', 'length', 'limit',
+      // Async infrastructure
+      'store', 'cache', 'queue', 'worker', 'job', 'sender', 'template',
+      // Validation
+      'validator', 'verifier', 'parser',
+    ]);
+
+    const followingWords = words.slice(keywordIndex + 1);
+    return followingWords.every(w => operationalQualifiers.has(w));
+  }
+
+  /**
    * Analyze what's being logged to detect sensitive data
    */
   private analyzeSensitivity(node: ts.CallExpression): { isSensitive: boolean; reason?: string } {
@@ -373,7 +516,13 @@ export class ConsoleInProductionDetector extends BaseEngine {
 
     // Check all arguments for sensitive variable names or patterns
     for (const arg of node.arguments) {
-      const argText = arg.getText().toLowerCase();
+      // Skip plain string literals — they are message text, not data.
+      // e.g., console.error('Error changing password:', err) — 'password' is in the
+      // message string, not in a variable being logged. Only identifiers and
+      // expressions contain data values worth checking.
+      if (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) {
+        continue;
+      }
 
       // Sensitive keywords in variable names
       const sensitiveKeywords = [
@@ -396,13 +545,33 @@ export class ConsoleInProductionDetector extends BaseEngine {
         'connection_string', 'db_password', 'database_url',
       ];
 
+      // Use original text (not lowercased) for boundary detection that respects camelCase
+      const argTextOriginal = arg.getText();
+
       for (const keyword of sensitiveKeywords) {
-        if (argText.includes(keyword)) {
-          return {
-            isSensitive: true,
-            reason: `variable name contains '${keyword}'`
-          };
+        // Check if keyword appears at a logical identifier boundary in the original text.
+        // Matches: password, user_password, getPassword, this.password, PASSWORD
+        // Does NOT match: pin in typing, health in unhealthy
+        if (!this.hasKeywordAtBoundary(argTextOriginal, keyword)) {
+          continue;
         }
+
+        // Keyword found at boundary — check for non-sensitive context dynamically.
+        // Extract individual identifier tokens from the arg expression and check if
+        // any token contains the keyword only as a functional modifier prefix
+        // (e.g., sessionManager, healthCheck, authService).
+        const identifierTokens = argTextOriginal
+          .split(/[.[\](),'"\s]+/)
+          .filter(p => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(p));
+
+        if (identifierTokens.some(token => this.isKeywordInNonSensitiveContext(token, keyword))) {
+          continue; // Keyword is a functional modifier, not the data itself
+        }
+
+        return {
+          isSensitive: true,
+          reason: `variable name contains '${keyword}'`
+        };
       }
 
       // Check for object spreading that might include sensitive fields

@@ -58,6 +58,11 @@ export class StackTraceDetector extends BaseEngine {
           return;
         }
 
+        // Stack trace in a throw statement — not exposed to clients
+        if (this.isInThrowContext(node)) {
+          return;
+        }
+
         // Stack trace going to an HTTP response — severity error
         if (this.isInResponseContext(node)) {
           // Skip if inside a development guard
@@ -283,6 +288,9 @@ export class StackTraceDetector extends BaseEngine {
     let hasExplicitStack = false;
     let isSimpleErrorVar = false;
 
+    // Collect variable aliases for err.stack in enclosing scope
+    const stackAliases = this.findStackAliases(arg);
+
     const checkNode = (node: ts.Node) => {
       // Check for .stack property access
       if (ts.isPropertyAccessExpression(node)) {
@@ -293,6 +301,12 @@ export class StackTraceDetector extends BaseEngine {
             hasExplicitStack = true;
           }
         }
+      }
+
+      // Check for aliased stack variables: const trace = err.stack; res.json({ trace })
+      if (ts.isIdentifier(node) && stackAliases.has(node.text)) {
+        hasStack = true;
+        hasExplicitStack = true;
       }
 
       // Check for object literal with stack property
@@ -368,6 +382,27 @@ export class StackTraceDetector extends BaseEngine {
         }
       }
 
+      // Check for template literals containing err.stack: `Error: ${err.stack}`
+      if (ts.isTemplateExpression(node)) {
+        for (const span of node.templateSpans) {
+          const expr = span.expression;
+          // ${err.stack}
+          if (ts.isPropertyAccessExpression(expr) &&
+              ts.isIdentifier(expr.name) && expr.name.text === 'stack' &&
+              this.isErrorVariable(expr.expression)) {
+            hasStack = true;
+            hasExplicitStack = true;
+          }
+          // ${err} — template coerces to string which includes stack
+          // Only flag if the identifier is actually an error object (from catch clause
+          // or error handler param) to avoid FPs on variables coincidentally named 'error'
+          if (ts.isIdentifier(expr) && this.isErrorVariable(expr) &&
+              (this.isFromCatchClause(expr) || this.isErrorHandlerParam(expr))) {
+            hasStack = true;
+          }
+        }
+      }
+
       ts.forEachChild(node, checkNode);
     };
 
@@ -419,6 +454,54 @@ export class StackTraceDetector extends BaseEngine {
       if (ts.isFunctionDeclaration(current) || ts.isFunctionExpression(current) ||
           ts.isArrowFunction(current) || ts.isMethodDeclaration(current)) {
         return false;
+      }
+      current = current.parent;
+    }
+    return false;
+  }
+
+  /**
+   * Check if an identifier resolves to a catch clause variable.
+   * Unlike isCatchScopedIdentifier (which only checks 'e'), this works for any variable name.
+   */
+  private isFromCatchClause(node: ts.Identifier): boolean {
+    const name = node.text;
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (ts.isCatchClause(current)) {
+        if (current.variableDeclaration &&
+            ts.isIdentifier(current.variableDeclaration.name) &&
+            current.variableDeclaration.name.text === name) {
+          return true;
+        }
+      }
+      if (ts.isFunctionDeclaration(current) || ts.isFunctionExpression(current) ||
+          ts.isArrowFunction(current) || ts.isMethodDeclaration(current)) {
+        return false;
+      }
+      current = current.parent;
+    }
+    return false;
+  }
+
+  /**
+   * Check if an identifier is an error handler parameter (e.g., Express error middleware).
+   * Pattern: (err, req, res, next) => { ... } — 4 params, err is first
+   */
+  private isErrorHandlerParam(node: ts.Identifier): boolean {
+    const name = node.text;
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (ts.isFunctionDeclaration(current) || ts.isFunctionExpression(current) ||
+          ts.isArrowFunction(current) || ts.isMethodDeclaration(current)) {
+        const fn = current as ts.FunctionLikeDeclaration;
+        // Express error handler: (err, req, res, next) — 4 params, first is the error
+        if (fn.parameters.length === 4 &&
+            ts.isIdentifier(fn.parameters[0].name) &&
+            fn.parameters[0].name.text === name) {
+          return true;
+        }
+        return false; // Stop at first function boundary
       }
       current = current.parent;
     }
@@ -539,6 +622,54 @@ export class StackTraceDetector extends BaseEngine {
   }
 
   /**
+   * Find variables that alias err.stack in the enclosing function scope.
+   * e.g., const trace = err.stack; → 'trace' is an alias
+   */
+  private findStackAliases(node: ts.Node): Set<string> {
+    const aliases = new Set<string>();
+
+    // Walk up to find enclosing function or catch clause
+    let scope: ts.Node | undefined = node.parent;
+    while (scope && !ts.isSourceFile(scope)) {
+      if (ts.isFunctionDeclaration(scope) || ts.isFunctionExpression(scope) ||
+          ts.isArrowFunction(scope) || ts.isMethodDeclaration(scope) ||
+          ts.isCatchClause(scope)) {
+        break;
+      }
+      scope = scope.parent;
+    }
+    if (!scope || ts.isSourceFile(scope)) return aliases;
+
+    traverse(scope, (n) => {
+      // const trace = err.stack
+      if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
+        if (ts.isPropertyAccessExpression(n.initializer) &&
+            ts.isIdentifier(n.initializer.name) && n.initializer.name.text === 'stack' &&
+            this.isErrorVariable(n.initializer.expression)) {
+          aliases.add(n.name.text);
+        }
+      }
+      // const { stack } = err  or  const { stack: trace } = err
+      if (ts.isVariableDeclaration(n) && ts.isObjectBindingPattern(n.name) && n.initializer) {
+        if (this.isErrorVariable(n.initializer)) {
+          for (const element of n.name.elements) {
+            if (ts.isBindingElement(element)) {
+              const propName = element.propertyName
+                ? (ts.isIdentifier(element.propertyName) ? element.propertyName.text : null)
+                : (ts.isIdentifier(element.name) ? element.name.text : null);
+              if (propName === 'stack' && ts.isIdentifier(element.name)) {
+                aliases.add(element.name.text);
+              }
+            }
+          }
+        }
+      }
+    });
+
+    return aliases;
+  }
+
+  /**
    * Check if a call expression is an Express-style route registration call.
    * Matches: app.get(), app.post(), router.use(), app.all(), etc.
    */
@@ -624,6 +755,28 @@ export class StackTraceDetector extends BaseEngine {
       suggestion: 'Remove stack trace from formatError. Return only message and code. Log the full error server-side.',
       confidence: 'high',
     });
+  }
+
+  /**
+   * Check if a node is inside a throw statement (error propagation, not response exposure).
+   * Pattern: throw new Error(`... ${err.stack}`), throw { ...err }, etc.
+   */
+  private isInThrowContext(node: ts.Node): boolean {
+    let current = node.parent;
+    let depth = 0;
+    while (current && depth < 6) {
+      if (ts.isThrowStatement(current)) {
+        return true;
+      }
+      // Stop at function boundaries
+      if (ts.isFunctionDeclaration(current) || ts.isFunctionExpression(current) ||
+          ts.isArrowFunction(current) || ts.isMethodDeclaration(current)) {
+        return false;
+      }
+      current = current.parent;
+      depth++;
+    }
+    return false;
   }
 
   /**

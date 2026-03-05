@@ -50,6 +50,10 @@ export class MissingAwaitDetector extends BaseEngine {
     'monitor', 'ping', 'heartbeat', 'healthCheck',
     'warmCache', 'prefetch', 'preload',
     'notify', 'sendNotification', 'alert',
+    // Cleanup / lifecycle (commonly fire-and-forget in shutdown handlers)
+    'close', 'stop', 'destroy', 'dispose', 'shutdown', 'terminate',
+    'cleanup', 'teardown', 'disconnect', 'end', 'abort', 'cancel',
+    'unsubscribe', 'unregister', 'deregister', 'unlisten',
   ]);
 
   // ── Timer functions ──
@@ -124,6 +128,9 @@ export class MissingAwaitDetector extends BaseEngine {
     // 3. Promise chain (.then/.catch/.finally)
     if (this.hasPromiseHandler(node)) return null;
 
+    // 3b. for await...of iterable — async generators don't need explicit await
+    if (this.isForAwaitIterable(node)) return null;
+
     // 4. Callback-style call (last arg is (err, data) => ...)
     if (this.isCallbackStyleCall(node)) return null;
 
@@ -160,10 +167,14 @@ export class MissingAwaitDetector extends BaseEngine {
     const { expression } = node;
     let functionName: string | null = null;
     let objectName: string | null = null;
+    // Track if call uses method syntax (expr.method()) vs bare call (fn())
+    // Important: even when objectName is null (complex chains like arr.filter().join()),
+    // it's still a method call — S1/S2 should NOT match standalone declarations.
+    const isMethodCall = ts.isPropertyAccessExpression(expression);
 
     if (ts.isIdentifier(expression)) {
       functionName = expression.text;
-    } else if (ts.isPropertyAccessExpression(expression)) {
+    } else if (isMethodCall) {
       functionName = expression.name.text;
       objectName = this.getObjectName(expression.expression);
     }
@@ -174,11 +185,15 @@ export class MissingAwaitDetector extends BaseEngine {
     // ── Async Detection Strategies (ordered by confidence) ──
 
     // S1: Declared async in same file
+    // IMPORTANT: Only applies to bare function calls (not method calls).
+    // arr.filter().join() should NOT match standalone async function join().
+    // Method calls on objects should use S3 (known API) or S4 (this.method).
     const isDeclaredAsync = knownAsync
-      || (functionName ? this.isDeclaredAsAsync(functionName, context) : false);
+      || (!isMethodCall && functionName ? this.isDeclaredAsAsync(functionName, context) : false);
 
     // S2: TypeScript Promise<T> return type annotation
-    const hasPromiseReturn = !isDeclaredAsync && functionName
+    // Same restriction: only bare function calls (not method calls).
+    const hasPromiseReturn = !isDeclaredAsync && !isMethodCall && functionName
       ? this.hasPromiseReturnType(functionName, context)
       : false;
 
@@ -254,6 +269,13 @@ export class MissingAwaitDetector extends BaseEngine {
       }
     }
 
+    // ── Inline sync usage veto — call result consumed directly as function argument
+    //    or object property value. e.g., doSomething(loadConfig()) or { cfg: loadConfig() }
+    //    Developer expects a concrete value, not a Promise. Only for non-high-confidence.
+    if (!isHighConfidence && this.isUsedAsInlineArgument(node)) {
+      return null;
+    }
+
     // ── Return value usage check ──
     const returnValueUsed = this.isReturnValueUsed(node);
 
@@ -308,10 +330,23 @@ export class MissingAwaitDetector extends BaseEngine {
       if (ts.isAwaitExpression(p) || ts.isVoidExpression(p)) return true;
       // Chain continues through property access, call expressions, parenthesized exprs,
       // type assertions, and non-null assertions
-      if (ts.isCallExpression(p) || ts.isParenthesizedExpression(p) ||
+      if (ts.isParenthesizedExpression(p) ||
           ts.isNonNullExpression(p) || ts.isAsExpression(p) || ts.isTypeAssertionExpression(p)) {
         current = p;
         continue;
+      }
+      // Call expressions: only chain through if current is the callee (foo().bar()),
+      // NOT when current is an argument (wrapper(foo())).
+      // Being passed as an argument means the promise is consumed by the wrapper.
+      if (ts.isCallExpression(p)) {
+        if (p.expression === current || (ts.isPropertyAccessExpression(p.expression) &&
+            p.expression.expression === current)) {
+          // Current is the callee expression (chain) — continue chaining
+          current = p;
+          continue;
+        }
+        // Current is an argument — promise is consumed by the calling function
+        return true;
       }
       if (ts.isPropertyAccessExpression(p)) {
         // If the chain accesses .then/.catch/.finally, the promise is handled
@@ -334,6 +369,25 @@ export class MissingAwaitDetector extends BaseEngine {
     if (!parent || !ts.isPropertyAccessExpression(parent)) return false;
     const name = parent.name.text;
     return name === 'then' || name === 'catch' || name === 'finally';
+  }
+
+  /**
+   * Check if the call is the iterable in a `for await...of` statement.
+   * Async generators (async function*) are consumed this way — no explicit await needed.
+   */
+  private isForAwaitIterable(node: ts.CallExpression): boolean {
+    let current: ts.Node = node;
+    // Walk up through property access chains (e.g., obj.method().something)
+    while (current.parent && (ts.isPropertyAccessExpression(current.parent) ||
+           ts.isCallExpression(current.parent) || ts.isParenthesizedExpression(current.parent))) {
+      current = current.parent;
+    }
+    // Check if parent is a ForOfStatement with awaitModifier
+    if (current.parent && ts.isForOfStatement(current.parent) &&
+        current.parent.awaitModifier && current.parent.expression === current) {
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -403,7 +457,9 @@ export class MissingAwaitDetector extends BaseEngine {
     const firstParam = params[0];
     if (ts.isIdentifier(firstParam.name)) {
       const name = firstParam.name.text.toLowerCase();
-      return name === 'err' || name === 'error' || name === 'e' || name === '_';
+      // Standard Node.js callback error parameter names
+      return name === 'err' || name === 'error' || name === 'e' || name === '_'
+        || name === 'ex' || name === 'exception' || name === 'exc';
     }
     return false;
   }
@@ -412,14 +468,45 @@ export class MissingAwaitDetector extends BaseEngine {
    * Get the variable name if the call result is assigned.
    */
   private getAssignedVariable(node: ts.CallExpression): { name: string; node: ts.Node } | null {
-    const parent = node.parent;
+    // Walk up through transparent wrappers: ternary, logical ops, parentheses
+    let current: ts.Node = node;
+    while (current.parent) {
+      const p = current.parent;
+      if (ts.isParenthesizedExpression(p) || ts.isNonNullExpression(p) || ts.isAsExpression(p)) {
+        current = p;
+        continue;
+      }
+      // Ternary: const x = cond ? asyncFn() : fallback
+      if (ts.isConditionalExpression(p) && (current === p.whenTrue || current === p.whenFalse)) {
+        current = p;
+        continue;
+      }
+      // Logical: const x = maybeNull || asyncFn()
+      if (ts.isBinaryExpression(p) &&
+          (p.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
+           p.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken ||
+           p.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken)) {
+        current = p;
+        continue;
+      }
+      break;
+    }
+
+    const parent = current.parent;
     if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
       return { name: parent.name.text, node: parent };
     }
     if (parent && ts.isBinaryExpression(parent) &&
-        parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-        ts.isIdentifier(parent.left)) {
-      return { name: parent.left.text, node: parent };
+        parent.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      // const x = asyncCall()
+      if (ts.isIdentifier(parent.left)) {
+        return { name: parent.left.text, node: parent };
+      }
+      // this.prop = asyncCall() — promise stored in property for later await
+      if (ts.isPropertyAccessExpression(parent.left)) {
+        const propName = parent.left.name.text;
+        return { name: propName, node: parent };
+      }
     }
     return null;
   }
@@ -443,20 +530,29 @@ export class MissingAwaitDetector extends BaseEngine {
       if (n === assignmentNode) { pastAssignment = true; return; }
       if (!pastAssignment) return;
 
-      // await variableName
-      if (ts.isAwaitExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === varName) {
+      // Helper: check if an expression references the variable (bare or this.prop)
+      const isVarRef = (expr: ts.Node): boolean => {
+        if (ts.isIdentifier(expr) && expr.text === varName) return true;
+        // Also match this.varName for property assignments
+        if (ts.isPropertyAccessExpression(expr) &&
+            expr.expression.kind === ts.SyntaxKind.ThisKeyword &&
+            expr.name.text === varName) return true;
+        return false;
+      };
+
+      // await variableName / await this.variableName
+      if (ts.isAwaitExpression(n) && isVarRef(n.expression)) {
         found = true; return;
       }
 
-      // variableName.then( or .catch(
-      if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.expression) &&
-          n.expression.text === varName &&
+      // variableName.then( or .catch( / this.variableName.then(
+      if (ts.isPropertyAccessExpression(n) && isVarRef(n.expression) &&
           (n.name.text === 'then' || n.name.text === 'catch' || n.name.text === 'finally')) {
         found = true; return;
       }
 
-      // return variableName
-      if (ts.isReturnStatement(n) && n.expression && ts.isIdentifier(n.expression) && n.expression.text === varName) {
+      // return variableName / return this.variableName
+      if (ts.isReturnStatement(n) && n.expression && isVarRef(n.expression)) {
         found = true; return;
       }
 
@@ -471,6 +567,25 @@ export class MissingAwaitDetector extends BaseEngine {
           });
           if (hasVar) { found = true; return; }
         }
+      }
+
+      // variableName.exec() / .subscribe() / .end() / .pipe() — terminal promise consumers
+      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
+          ts.isIdentifier(n.expression.expression) && n.expression.expression.text === varName) {
+        const method = n.expression.name.text;
+        if (['exec', 'subscribe', 'end', 'pipe', 'toPromise', 'unsubscribe',
+             'on', 'once', 'emit', 'addEventListener'].includes(method)) {
+          found = true; return;
+        }
+      }
+
+      // await inside conditional block: if (...) { await variableName }
+      if (ts.isAwaitExpression(n)) {
+        let hasVar = false;
+        traverse(n.expression, (inner) => {
+          if (ts.isIdentifier(inner) && inner.text === varName) hasVar = true;
+        });
+        if (hasVar) { found = true; return; }
       }
 
     });
@@ -768,6 +883,10 @@ export class MissingAwaitDetector extends BaseEngine {
     if (ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)) {
       return typeNode.typeName.text === 'Promise';
     }
+    // Union types: Promise<T> | null, Promise<T> | undefined
+    if (ts.isUnionTypeNode(typeNode)) {
+      return typeNode.types.some(t => this.isPromiseTypeNode(t));
+    }
     return false;
   }
 
@@ -879,6 +998,20 @@ export class MissingAwaitDetector extends BaseEngine {
       const rest = functionName.slice(3);
       // Must start with uppercase (camelCase)
       if (rest[0] !== rest[0].toUpperCase() || rest[0] === rest[0].toLowerCase()) return false;
+      // Exclude sync getter patterns — property/attribute accessors
+      const syncGetterSuffixes = [
+        'Name', 'Type', 'Value', 'Label', 'Text', 'Key', 'Index', 'Count', 'Length',
+        'Size', 'Status', 'State', 'Mode', 'Kind', 'Category', 'Level', 'Priority',
+        'Score', 'Rank', 'Order', 'Position', 'Offset', 'Limit', 'Page', 'Version',
+        'Format', 'Style', 'Color', 'Font', 'Width', 'Height', 'Depth', 'Radius',
+        'Angle', 'Unit', 'Currency', 'Locale', 'Timezone', 'Pattern', 'Prefix',
+        'Suffix', 'Separator', 'Delimiter', 'Extension', 'Path', 'Dir', 'Url',
+        'Hash', 'Checksum', 'Property', 'Attribute', 'Element', 'Cache', 'Default',
+        'Instance', 'Class', 'Constructor', 'Prototype', 'Schema', 'Enum', 'Flag',
+        'Option', 'Param', 'Arg', 'Description', 'Title', 'Header', 'Footer',
+        'Column', 'Row', 'Field', 'Selector', 'Tag', 'Id',
+      ];
+      if (syncGetterSuffixes.some(s => rest === s || rest.endsWith(s))) return false;
       // Only match data-fetching patterns
       const dataWords = ['User', 'Data', 'Items', 'List', 'Record', 'Result', 'Response',
         'Config', 'Settings', 'Profile', 'Order', 'Product', 'Post', 'Comment',
@@ -887,8 +1020,9 @@ export class MissingAwaitDetector extends BaseEngine {
       if (dataWords.some(w => rest.startsWith(w))) return true;
       if (rest.endsWith('ById') || rest.endsWith('ByEmail') || rest.endsWith('BySlug')
           || rest.endsWith('ByName') || rest.endsWith('ByKey') || rest.endsWith('ByToken')) return true;
-      // Plural ending suggests collection fetch (getUsers, getOrders)
-      if (rest.endsWith('s') && rest.length > 2 && !rest.endsWith('ss')) return true;
+      // Note: plural endings (getUsers, getOrders) removed from S5 — too weak as standalone
+      // signal. Sync cache lookups like `getUsers()` were false-positiving. These names
+      // can still be flagged via S6 (module import) + S7 (used as async elsewhere) or S8.
     }
 
     return false;
@@ -919,7 +1053,9 @@ export class MissingAwaitDetector extends BaseEngine {
 
         if (importsFunction) {
           // Match against the last path segment (module filename), not directories
-          const lastSegment = modulePath.split('/').pop() || '';
+          // Strip file extensions (.js, .ts, .mjs, .cjs) before matching
+          const rawSegment = modulePath.split('/').pop() || '';
+          const lastSegment = rawSegment.replace(/\.(js|ts|mjs|cjs|jsx|tsx)$/, '');
           if (asyncModulePatterns.some(p => p.test(lastSegment))) {
             found = true;
           }
@@ -965,15 +1101,10 @@ export class MissingAwaitDetector extends BaseEngine {
       /^execute[A-Z]/,
       /^run[A-Z]/,
     ];
-    const weakPatterns = [
-      /^(get|read|write|query|insert|find|search)$/i,
-    ];
-
     if (strongPatterns.some(p => p.test(functionName))) return true;
-    if (weakPatterns.some(p => p.test(functionName))) {
-      const syncGetterPatterns = [/^get\w+(Name|Type|Value|Label|Text|Key|Id|Index|Count|Length|Size)$/i];
-      if (!syncGetterPatterns.some(p => p.test(functionName))) return true;
-    }
+    // Note: bare "read", "write", "insert", "search", "find", "query", "get" removed from S8.
+    // These are extremely common sync function names (Array.find, Buffer.read, Array.insert).
+    // They can still be flagged via S1-S4 (declared async, Promise<T>, known API) or S5-S7.
     return false;
   }
 
@@ -1142,23 +1273,28 @@ export class MissingAwaitDetector extends BaseEngine {
       tier = 'high';
     }
 
-    // Map tier + detection confidence to severity/confidence
-    // S5 (naming heuristic) or S6 (module import) → medium confidence
-    // S7 alone (used as async elsewhere) → low (weak evidence: no scope checking)
+    // Confidence mapping:
+    // S5 (naming heuristic) → medium (strong naming signal)
+    // S6 (module import) alone → low (service modules often export sync utilities)
+    // S6 + S5 combined → medium (two independent signals reinforce)
+    // S7 alone (used as async elsewhere) → low (weak: no scope checking)
     // S8 (pattern match only) → low
     let confidence: 'high' | 'medium' | 'low';
     if (isHighConfidence) {
       confidence = 'high';
-    } else if (isHeuristicallyAsync || isFromAsyncModule) {
+    } else if (isHeuristicallyAsync) {
+      // S5 alone or S5+S6/S7 → medium
       confidence = 'medium';
-    } else if (isUsedAsAsync) {
-      confidence = 'low';
+    } else if (isFromAsyncModule && isUsedAsAsync) {
+      // S6+S7 combined → medium (two weak signals reinforce)
+      confidence = 'medium';
     } else {
+      // S6 alone, S7 alone, or S8 alone → low
       confidence = 'low';
     }
 
     switch (tier) {
-      case 'critical': return { severity: 'error', confidence: 'high' };
+      case 'critical': return { severity: 'error', confidence };
       case 'high': return { severity: 'error', confidence };
       case 'warning': return { severity: 'warning', confidence };
       case 'info': return { severity: 'info', confidence: 'low' };
@@ -1412,7 +1548,7 @@ export class MissingAwaitDetector extends BaseEngine {
         return true;
       }
 
-      return true; // Default: assume used (conservative)
+      return false; // Default: assume NOT used (avoids severity over-escalation)
     }
 
     return true;
@@ -1504,9 +1640,55 @@ export class MissingAwaitDetector extends BaseEngine {
           return;
         }
       }
+
+      // variable passed as function argument — e.g., openSelector(selector, ...)
+      // Developer expects a concrete value, not a Promise
+      if (ts.isCallExpression(n)) {
+        for (const arg of n.arguments) {
+          if (ts.isIdentifier(arg) && arg.text === varName) {
+            found = true;
+            return;
+          }
+        }
+      }
     });
 
     return found;
+  }
+
+  /**
+   * Check if a call result is used directly as an argument or property value (no variable).
+   * e.g., doSomething(loadConfig()), { cfg: loadConfig() }, [loadConfig()]
+   * This proves the developer expects a concrete return value, not a Promise.
+   */
+  private isUsedAsInlineArgument(node: ts.CallExpression): boolean {
+    let current: ts.Node = node;
+    // Walk up through transparent wrappers
+    while (current.parent) {
+      const p = current.parent;
+      if (ts.isParenthesizedExpression(p) || ts.isAsExpression(p) || ts.isNonNullExpression(p)) {
+        current = p;
+        continue;
+      }
+      // Direct function argument: doSomething(fn())
+      if (ts.isCallExpression(p) && p.arguments.some(a => a === current)) {
+        return true;
+      }
+      // Object property value: { key: fn() }
+      if (ts.isPropertyAssignment(p) && p.initializer === current) {
+        return true;
+      }
+      // Array element: [fn()]
+      if (ts.isArrayLiteralExpression(p)) {
+        return true;
+      }
+      // Spread: ...fn()
+      if (ts.isSpreadElement(p)) {
+        return true;
+      }
+      break;
+    }
+    return false;
   }
 
   /**

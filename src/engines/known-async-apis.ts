@@ -17,6 +17,12 @@ const ORM_READ_METHODS = new Set([
   'count', 'countDocuments', 'aggregate', 'groupBy',
   'max', 'min', 'sum', 'query',
   'reload', 'populate',
+  // TypeORM query builder terminals
+  'getMany', 'getOne', 'getRawMany', 'getRawOne', 'getManyAndCount', 'getCount',
+  // MongoDB native
+  'insertOne', 'insertMany', 'bulkWrite', 'replaceOne', 'distinct',
+  // MikroORM
+  'persist', 'flush', 'persistAndFlush', 'removeAndFlush', 'nativeInsert', 'nativeUpdate', 'nativeDelete',
 ]);
 
 /** ORM write methods */
@@ -118,6 +124,19 @@ export const KNOWN_ASYNC_METHODS = new Map<string, Set<string>>([
 
   // ── Node.js streams (promisified) ──
   ['stream', new Set(['pipeline', 'finished'])],
+
+  // ── TypeORM query builder ──
+  ['queryBuilder', new Set(['getMany', 'getOne', 'getRawMany', 'getRawOne', 'getManyAndCount', 'getCount', 'execute'])],
+
+  // ── MongoDB native driver ──
+  ['collection', new Set(['insertOne', 'insertMany', 'findOne', 'find', 'updateOne', 'updateMany', 'deleteOne', 'deleteMany', 'countDocuments', 'aggregate', 'bulkWrite', 'replaceOne', 'distinct'])],
+
+  // ── MikroORM ──
+  ['em', new Set(['find', 'findOne', 'findOneOrFail', 'findAll', 'persist', 'flush', 'persistAndFlush', 'removeAndFlush', 'nativeInsert', 'nativeUpdate', 'nativeDelete'])],
+  ['entityManager', new Set(['find', 'findOne', 'findOneOrFail', 'findAll', 'persist', 'flush', 'persistAndFlush', 'removeAndFlush', 'nativeInsert', 'nativeUpdate', 'nativeDelete'])],
+
+  // ── Undici / node-fetch / cross-fetch ──
+  ['undici', new Set(['request', 'fetch', 'stream', 'pipeline', 'connect', 'upgrade'])],
 ]);
 
 /** Standalone async functions (no object prefix) */
@@ -145,6 +164,9 @@ const DB_READ_SET = new Set([
   'findFirstOrThrow', 'findUniqueOrThrow',
   'count', 'countDocuments', 'aggregate', 'groupBy', 'max', 'min', 'sum',
   'select', 'first', 'exec', 'reload', 'populate', 'query',
+  'getMany', 'getOne', 'getRawMany', 'getRawOne', 'getManyAndCount', 'getCount',
+  'insertOne', 'insertMany', 'bulkWrite', 'replaceOne', 'distinct',
+  'persist', 'flush', 'persistAndFlush', 'removeAndFlush', 'nativeInsert', 'nativeUpdate', 'nativeDelete',
 ]);
 
 /** File system method names */
