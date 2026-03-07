@@ -1,0 +1,1578 @@
+{
+  "version": "1",
+  "projectRoot": "D:\\codedrift",
+  "entries": {
+    "D:\\codedrift\\src\\cli.ts": {
+      "filePath": "D:\\codedrift\\src\\cli.ts",
+      "contentHash": "e5cafbba4909d25d",
+      "summaryIds": [],
+      "dependencies": [],
+      "timestamp": 1772916892560
+    },
+    "D:\\codedrift\\src\\cli-core.ts": {
+      "filePath": "D:\\codedrift\\src\\cli-core.ts",
+      "contentHash": "11097f9787f8cb89",
+      "summaryIds": [],
+      "dependencies": [],
+      "timestamp": 1772916892567
+    },
+    "D:\\codedrift\\src\\bin.ts": {
+      "filePath": "D:\\codedrift\\src\\bin.ts",
+      "contentHash": "4e5dee7f41a36f2c",
+      "summaryIds": [],
+      "dependencies": [],
+      "timestamp": 1772916892568
+    },
+    "D:\\codedrift\\src\\utils\\typosquat-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\utils\\typosquat-detector.ts",
+      "contentHash": "e6527f1463294ff8",
+      "summaryIds": [
+        "D:\\codedrift\\src\\utils\\typosquat-detector.ts#levenshteinDistance",
+        "D:\\codedrift\\src\\utils\\typosquat-detector.ts#checkTyposquat",
+        "D:\\codedrift\\src\\utils\\typosquat-detector.ts#hasTyposquatPattern"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892629
+    },
+    "D:\\codedrift\\src\\utils\\tsconfig-resolver.ts": {
+      "filePath": "D:\\codedrift\\src\\utils\\tsconfig-resolver.ts",
+      "contentHash": "2f5bebd77264aac9",
+      "summaryIds": [
+        "D:\\codedrift\\src\\utils\\tsconfig-resolver.ts#loadTsConfigFile",
+        "D:\\codedrift\\src\\utils\\tsconfig-resolver.ts#toAliasPrefix",
+        "D:\\codedrift\\src\\utils\\tsconfig-resolver.ts#collectAliases",
+        "D:\\codedrift\\src\\utils\\tsconfig-resolver.ts#loadPathAliases"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892641
+    },
+    "D:\\codedrift\\src\\utils\\test-file-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\utils\\test-file-detector.ts",
+      "contentHash": "bfc648d2142dad63",
+      "summaryIds": [
+        "D:\\codedrift\\src\\utils\\test-file-detector.ts#isTestFile",
+        "D:\\codedrift\\src\\utils\\test-file-detector.ts#detectWorkspaceName"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892647
+    },
+    "D:\\codedrift\\src\\utils\\package-resolver.ts": {
+      "filePath": "D:\\codedrift\\src\\utils\\package-resolver.ts",
+      "contentHash": "77e624e03a21890a",
+      "summaryIds": [
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#normalizePath",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.constructor",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.loadPackageJson",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.findNearestPackageJson",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.hasDependency",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.hasDevDependency",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.hasAnyDependency",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.packageExists",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.packageExistsForFile",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.isInDependencies",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.getWorkspaceName",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.loadWorkspaces",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.getWorkspacePatterns",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.resolveWorkspacePattern",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.isInLockfile",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.loadLockfile",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.existsInNodeModules",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.getWorkspaces",
+        "D:\\codedrift\\src\\utils\\package-resolver.ts#PackageResolver.resolvePackage"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892697
+    },
+    "D:\\codedrift\\src\\utils\\index.ts": {
+      "filePath": "D:\\codedrift\\src\\utils\\index.ts",
+      "contentHash": "18deb9751ffcc24f",
+      "summaryIds": [],
+      "dependencies": [],
+      "timestamp": 1772916892698
+    },
+    "D:\\codedrift\\src\\utils\\gitignore-parser.ts": {
+      "filePath": "D:\\codedrift\\src\\utils\\gitignore-parser.ts",
+      "contentHash": "7628c11240bd26b9",
+      "summaryIds": [
+        "D:\\codedrift\\src\\utils\\gitignore-parser.ts#GitIgnoreParser.constructor",
+        "D:\\codedrift\\src\\utils\\gitignore-parser.ts#GitIgnoreParser.loadGitignore",
+        "D:\\codedrift\\src\\utils\\gitignore-parser.ts#GitIgnoreParser.parseGitignore",
+        "D:\\codedrift\\src\\utils\\gitignore-parser.ts#GitIgnoreParser.parsePattern",
+        "D:\\codedrift\\src\\utils\\gitignore-parser.ts#GitIgnoreParser.patternToRegex",
+        "D:\\codedrift\\src\\utils\\gitignore-parser.ts#GitIgnoreParser.addPatterns",
+        "D:\\codedrift\\src\\utils\\gitignore-parser.ts#GitIgnoreParser.ignores",
+        "D:\\codedrift\\src\\utils\\gitignore-parser.ts#GitIgnoreParser.shouldIgnore",
+        "D:\\codedrift\\src\\utils\\gitignore-parser.ts#GitIgnoreParser.getRules",
+        "D:\\codedrift\\src\\utils\\gitignore-parser.ts#GitIgnoreParser.clearRules",
+        "D:\\codedrift\\src\\utils\\gitignore-parser.ts#GitIgnoreParser.reload",
+        "D:\\codedrift\\src\\utils\\gitignore-parser.ts#createGitIgnoreParser"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892713
+    },
+    "D:\\codedrift\\src\\utils\\file-utils.ts": {
+      "filePath": "D:\\codedrift\\src\\utils\\file-utils.ts",
+      "contentHash": "58cc8db82707975f",
+      "summaryIds": [
+        "D:\\codedrift\\src\\utils\\file-utils.ts#isTestFile",
+        "D:\\codedrift\\src\\utils\\file-utils.ts#isGeneratedFile",
+        "D:\\codedrift\\src\\utils\\file-utils.ts#getFileCategory",
+        "D:\\codedrift\\src\\utils\\file-utils.ts#isCLIFile",
+        "D:\\codedrift\\src\\utils\\file-utils.ts#isConfigFile",
+        "D:\\codedrift\\src\\utils\\file-utils.ts#isMigrationFile",
+        "D:\\codedrift\\src\\utils\\file-utils.ts#isBuildArtifact",
+        "D:\\codedrift\\src\\utils\\file-utils.ts#extractPackageName",
+        "D:\\codedrift\\src\\utils\\file-utils.ts#isRelativeOrAbsoluteImport",
+        "D:\\codedrift\\src\\utils\\file-utils.ts#isPathAlias",
+        "D:\\codedrift\\src\\utils\\file-utils.ts#isNodeBuiltin",
+        "D:\\codedrift\\src\\utils\\file-utils.ts#calculateEntropy",
+        "D:\\codedrift\\src\\utils\\file-utils.ts#extractContextSnippet"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892725
+    },
+    "D:\\codedrift\\src\\types\\index.ts": {
+      "filePath": "D:\\codedrift\\src\\types\\index.ts",
+      "contentHash": "7c9f8a66d5d38055",
+      "summaryIds": [],
+      "dependencies": [],
+      "timestamp": 1772916892728
+    },
+    "D:\\codedrift\\src\\formatters\\types.ts": {
+      "filePath": "D:\\codedrift\\src\\formatters\\types.ts",
+      "contentHash": "85b5a02566011e69",
+      "summaryIds": [
+        "D:\\codedrift\\src\\formatters\\types.ts#calculateRiskScore",
+        "D:\\codedrift\\src\\formatters\\types.ts#groupIssues",
+        "D:\\codedrift\\src\\formatters\\types.ts#getEngineName",
+        "D:\\codedrift\\src\\formatters\\types.ts#getSeverityIcon",
+        "D:\\codedrift\\src\\formatters\\types.ts#getConfidenceStars",
+        "D:\\codedrift\\src\\formatters\\types.ts#truncatePath"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892735
+    },
+    "D:\\codedrift\\src\\formatters\\summary.ts": {
+      "filePath": "D:\\codedrift\\src\\formatters\\summary.ts",
+      "contentHash": "df8496c8c08ffc9d",
+      "summaryIds": [
+        "D:\\codedrift\\src\\formatters\\summary.ts#formatSummary",
+        "D:\\codedrift\\src\\formatters\\summary.ts#truncateFilePath"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892750
+    },
+    "D:\\codedrift\\src\\formatters\\sarif.ts": {
+      "filePath": "D:\\codedrift\\src\\formatters\\sarif.ts",
+      "contentHash": "47190a28608802c8",
+      "summaryIds": [
+        "D:\\codedrift\\src\\formatters\\sarif.ts#toSarifLevel",
+        "D:\\codedrift\\src\\formatters\\sarif.ts#toSarifUri",
+        "D:\\codedrift\\src\\formatters\\sarif.ts#buildRules",
+        "D:\\codedrift\\src\\formatters\\sarif.ts#formatSARIF"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892756
+    },
+    "D:\\codedrift\\src\\formatters\\index.ts": {
+      "filePath": "D:\\codedrift\\src\\formatters\\index.ts",
+      "contentHash": "7b6efcaaf1139c3b",
+      "summaryIds": [
+        "D:\\codedrift\\src\\formatters\\index.ts#formatOutput"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892761
+    },
+    "D:\\codedrift\\src\\formatters\\grouped.ts": {
+      "filePath": "D:\\codedrift\\src\\formatters\\grouped.ts",
+      "contentHash": "c1ea8c470782e87b",
+      "summaryIds": [
+        "D:\\codedrift\\src\\formatters\\grouped.ts#formatGrouped",
+        "D:\\codedrift\\src\\formatters\\grouped.ts#formatGroupName",
+        "D:\\codedrift\\src\\formatters\\grouped.ts#formatGroupCounts",
+        "D:\\codedrift\\src\\formatters\\grouped.ts#formatGroupedIssue",
+        "D:\\codedrift\\src\\formatters\\grouped.ts#truncateFilePath",
+        "D:\\codedrift\\src\\formatters\\grouped.ts#capitalize"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892774
+    },
+    "D:\\codedrift\\src\\formatters\\examples.ts": {
+      "filePath": "D:\\codedrift\\src\\formatters\\examples.ts",
+      "contentHash": "0bcbd5339cce53a9",
+      "summaryIds": [],
+      "dependencies": [],
+      "timestamp": 1772916892778
+    },
+    "D:\\codedrift\\src\\formatters\\detailed.ts": {
+      "filePath": "D:\\codedrift\\src\\formatters\\detailed.ts",
+      "contentHash": "3639136dfa35a964",
+      "summaryIds": [
+        "D:\\codedrift\\src\\formatters\\detailed.ts#formatDetailed",
+        "D:\\codedrift\\src\\formatters\\detailed.ts#formatDetailedIssue",
+        "D:\\codedrift\\src\\formatters\\detailed.ts#getCodeContext",
+        "D:\\codedrift\\src\\formatters\\detailed.ts#capitalize"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892794
+    },
+    "D:\\codedrift\\src\\formatters\\compact.ts": {
+      "filePath": "D:\\codedrift\\src\\formatters\\compact.ts",
+      "contentHash": "a0bea318f7ef6d0c",
+      "summaryIds": [
+        "D:\\codedrift\\src\\formatters\\compact.ts#formatCompact"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892797
+    },
+    "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts",
+      "contentHash": "72b42298d10faeb2",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.analyze",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.checkRegexLiteral",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.checkRegExpStaticPattern",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.checkPattern",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.getStaticReDoSSeverity",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.regexAppliesToUserInput",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.isInRouteHandler",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.isInValidatorFunction",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.isBoundedInput",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.variableComesFromBoundedMethod",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.hasOverlappingAlternation",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.alternativesOverlap",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.hasQuantifiedOverlap",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.hasLiteralDelimiterInGap",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.checkDynamicRegExp",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.isUserInputExpression",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.containsUserInput",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.traceVariable",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.isEscapedExpression",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.isEscapedVariable",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.isEscapeCall",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.isInlineEscapeReplace",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.tracesToTrustedSource",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.isFunctionParameter",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.hasDisjointDelimiters",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.findQuantifiedGroups",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.allNestedQuantifiersAreBounded",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.isFullyAnchored",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.hasLiteralAnchorInGroups",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.groupHasMandatoryLiteralAnchor",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.extractFirstRegexElement",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.extractLastRegexElement",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.extractPrecedingRegexElement",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.elementsAreDisjoint",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.getCharCategories",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.classifyChar",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.parseCharClassContent",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.skipCharClass",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.findClosingBracket",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.getQuantifierNestingDepth",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.countInnerQuantifiers",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.isSimplePattern",
+        "D:\\codedrift\\src\\engines\\unsafe-regex-detector.ts#UnsafeRegexDetector.isFunctionLike"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892903
+    },
+    "D:\\codedrift\\src\\engines\\stack-trace-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\stack-trace-detector.ts",
+      "contentHash": "bd82eebb9f0aba85",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.analyze",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.isNodeInsideReportedNode",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.isInResponseContext",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.isInLoggerContext",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.checkResponseCall",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.getObjectName",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.getBaseObjectName",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.isResponseMethod",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.containsStackTrace",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.getPropertyName",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.isErrorVariableName",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.isCatchScopedIdentifier",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.isFromCatchClause",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.isErrorHandlerParam",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.isErrorVariable",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.checkLoggerCall",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.isLoggerMethod",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.getExpressResponseParamName",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.findStackAliases",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.isExpressRouteCall",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.containsSensitiveData",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.checkGraphQLFormatError",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.isInThrowContext",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.isInDevelopmentGuard",
+        "D:\\codedrift\\src\\engines\\stack-trace-detector.ts#StackTraceDetector.isInThenBranch"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892934
+    },
+    "D:\\codedrift\\src\\engines\\secret-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\secret-detector.ts",
+      "contentHash": "8fe5182d55422a69",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\secret-detector.ts#SecretDetector.analyze",
+        "D:\\codedrift\\src\\engines\\secret-detector.ts#SecretDetector.runFullPipeline",
+        "D:\\codedrift\\src\\engines\\secret-detector.ts#SecretDetector.checkTemplateHead",
+        "D:\\codedrift\\src\\engines\\secret-detector.ts#SecretDetector.buildIssue",
+        "D:\\codedrift\\src\\engines\\secret-detector.ts#SecretDetector.getVariableName",
+        "D:\\codedrift\\src\\engines\\secret-detector.ts#SecretDetector.shouldSkip",
+        "D:\\codedrift\\src\\engines\\secret-detector.ts#SecretDetector.isInFormatValidationContext",
+        "D:\\codedrift\\src\\engines\\secret-detector.ts#SecretDetector.isFilePath",
+        "D:\\codedrift\\src\\engines\\secret-detector.ts#SecretDetector.isInSafeCallContext",
+        "D:\\codedrift\\src\\engines\\secret-detector.ts#SecretDetector.isPlaceholder",
+        "D:\\codedrift\\src\\engines\\secret-detector.ts#SecretDetector.isPrefixBodyTestValue",
+        "D:\\codedrift\\src\\engines\\secret-detector.ts#SecretDetector.isKnownSafeExample",
+        "D:\\codedrift\\src\\engines\\secret-detector.ts#SecretDetector.isTestValue"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916892962
+    },
+    "D:\\codedrift\\src\\engines\\missing-input-validation-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\missing-input-validation-detector.ts",
+      "contentHash": "57e91c8607b30a35",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\missing-input-validation-detector.ts#MissingInputValidationDetector.hasTypedOrmUsage",
+        "D:\\codedrift\\src\\engines\\missing-input-validation-detector.ts#MissingInputValidationDetector.analyze",
+        "D:\\codedrift\\src\\engines\\missing-input-validation-detector.ts#MissingInputValidationDetector.classifyUsageContext",
+        "D:\\codedrift\\src\\engines\\missing-input-validation-detector.ts#MissingInputValidationDetector.determineSeverity",
+        "D:\\codedrift\\src\\engines\\missing-input-validation-detector.ts#MissingInputValidationDetector.generateSuggestion",
+        "D:\\codedrift\\src\\engines\\missing-input-validation-detector.ts#MissingInputValidationDetector.checkHandlerValidation",
+        "D:\\codedrift\\src\\engines\\missing-input-validation-detector.ts#MissingInputValidationDetector.checkPartialValidation"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893002
+    },
+    "D:\\codedrift\\src\\engines\\missing-await-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\missing-await-detector.ts",
+      "contentHash": "3a6a95217af2db3a",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.analyze",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.checkMissingAwait",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isAwaited",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.hasVoidOperator",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.hasAwaitSuppressionComment",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.hasPromiseHandler",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isForAwaitIterable",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.hasImmediateChain",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isCallbackStyleCall",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.getAssignedVariable",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isVariableHandledLater",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isInsideAsyncFunction",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isReturned",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.findEnclosingAsyncFunction",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isTopLevelAsyncContext",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isInsideEventHandlerCallback",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isFrameworkDecoratedHandler",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isInsidePromiseAll",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isIIFE",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.getEnclosingCallExpression",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.getCalleeInfo",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isDeclaredAsAsync",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.hasPromiseReturnType",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isPromiseTypeNode",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isAsyncMethodInClass",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.findAsyncMemberInClass",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.findAsyncMemberInParentClass",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isLikelyAsync",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isImportedFromAsyncModule",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isUsedAsAsyncElsewhere",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.matchesAsyncPattern",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.classifyBlockContext",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isDescendantOf",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.detectSequenceGap",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.getAwaitedCallName",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isMongooseExecCall",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.classifySeverity",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.escalateTier",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.demoteTier",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isLastStatementInFunction",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isFireAndForgetName",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.generateContextualSuggestion",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isIntentionalFireAndForget",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isSyncMethod",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isReturnValueUsed",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isResultUsedSynchronously",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.isUsedAsInlineArgument",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.generateFireAndForgetSuggestion",
+        "D:\\codedrift\\src\\engines\\missing-await-detector.ts#MissingAwaitDetector.getObjectName"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893110
+    },
+    "D:\\codedrift\\src\\engines\\known-sync-apis.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\known-sync-apis.ts",
+      "contentHash": "a7e905c75e93b2d9",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\known-sync-apis.ts#matchesSyncObjectPattern",
+        "D:\\codedrift\\src\\engines\\known-sync-apis.ts#matchesSyncPrefix",
+        "D:\\codedrift\\src\\engines\\known-sync-apis.ts#matchesSyncMethodPattern"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893114
+    },
+    "D:\\codedrift\\src\\engines\\known-async-apis.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\known-async-apis.ts",
+      "contentHash": "4f1edae0d163dad7",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\known-async-apis.ts#isKnownAsyncAPI",
+        "D:\\codedrift\\src\\engines\\known-async-apis.ts#getAPICategory"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893121
+    },
+    "D:\\codedrift\\src\\engines\\index.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\index.ts",
+      "contentHash": "1f00b7740b92e5d3",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\index.ts#getEngine",
+        "D:\\codedrift\\src\\engines\\index.ts#getAllEngines"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893123
+    },
+    "D:\\codedrift\\src\\engines\\idor-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\idor-detector.ts",
+      "contentHash": "4e29d76266d160a1",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.classifyMiddleware",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.analyze",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.checkDatabaseQuery",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.isDatabaseObject",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.isRawSqlWithUserInput",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.usesUserSuppliedId",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.tracesBackToRequest",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.hasAuthorizationCheck",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.isAuthCondition",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.isAuthFunctionCall",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.isAuthDecorator",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.isOwnershipWhereText",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.checkRouteMiddleware",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.hasNoAuthMiddleware",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.isAuthenticationRoute",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.isReferenceDataQuery",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.findEnclosingFunction",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.hasWhereClauseOwnership",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.objectLiteralHasOwnershipKey",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.hasPostQueryOwnershipCheck",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.hasRouterLevelAuthMiddleware",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.findEnclosingRouteCall",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.isInsideRouteHandler",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.isFunctionLike",
+        "D:\\codedrift\\src\\engines\\idor-detector.ts#IDORDetector.getObjectName"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893190
+    },
+    "D:\\codedrift\\src\\engines\\hallucinated-deps-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\hallucinated-deps-detector.ts",
+      "contentHash": "9b130ab797b2969b",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\hallucinated-deps-detector.ts#HallucinatedDepsDetector.analyze",
+        "D:\\codedrift\\src\\engines\\hallucinated-deps-detector.ts#isTsConfigAlias"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893201
+    },
+    "D:\\codedrift\\src\\engines\\empty-catch-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\empty-catch-detector.ts",
+      "contentHash": "6c19bf140bf32091",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.analyze",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.checkEmptyCatch",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.isErrorHandled",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.containsIdentifier",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.isExpectedErrorPattern",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.hasIntentionalSuppressionComment",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.isEffectivelyEmpty",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.hasOnlySilentReturn",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.errorNotUsed",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.isSimpleLogging",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.getObjectName",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.hasUselessRethrow",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.hasOnlyConsoleLog",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.hasConditionalSwallowing",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.conditionHasInstanceof",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.hasTerminalElse",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.hasFallbackCall",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.isInsideLoop",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.hasExitStatement",
+        "D:\\codedrift\\src\\engines\\empty-catch-detector.ts#EmptyCatchDetector.isCleanupOnlyCatch"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893241
+    },
+    "D:\\codedrift\\src\\engines\\console-in-production-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\console-in-production-detector.ts",
+      "contentHash": "be41a41419fa89e1",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.analyze",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.checkConsoleCall",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.isInRouteHandler",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.getObjectName",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.isTestFile",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.fileUsesLoggerLibrary",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.isDevelopmentFile",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.isInDevelopmentBlock",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.isDevelopmentCondition",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.isInsideLoggerClass",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.hasEslintDisableComment",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.fileImportsDebugPackage",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.isDebugPackageCall",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.isInCatchBlock",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.hasStructuredLoggingArg",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.hasAnonymizationArg",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.hasKeywordAtBoundary",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.isKeywordInNonSensitiveContext",
+        "D:\\codedrift\\src\\engines\\console-in-production-detector.ts#ConsoleInProductionDetector.analyzeSensitivity"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893279
+    },
+    "D:\\codedrift\\src\\engines\\base-engine.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\base-engine.ts",
+      "contentHash": "284303e856a097c6",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\base-engine.ts#BaseEngine.createIssue",
+        "D:\\codedrift\\src\\engines\\base-engine.ts#BaseEngine.downgradeConfidence",
+        "D:\\codedrift\\src\\engines\\base-engine.ts#BaseEngine.isSuppressed",
+        "D:\\codedrift\\src\\engines\\base-engine.ts#BaseEngine.shouldAnalyze",
+        "D:\\codedrift\\src\\engines\\base-engine.ts#BaseEngine.checkTaint",
+        "D:\\codedrift\\src\\engines\\base-engine.ts#BaseEngine.analyzeTaintFlows",
+        "D:\\codedrift\\src\\engines\\base-engine.ts#BaseEngine.queryCrossFileTaint",
+        "D:\\codedrift\\src\\engines\\base-engine.ts#BaseEngine.resolveCallTarget",
+        "D:\\codedrift\\src\\engines\\base-engine.ts#BaseEngine.getSeverityLabel"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893293
+    },
+    "D:\\codedrift\\src\\engines\\async-foreach-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\async-foreach-detector.ts",
+      "contentHash": "8e4b95e21904c9d9",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#tierToSeverity",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#escalateTier",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.analyze",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.checkArrayMethodWithAsyncCallback",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.checkArrayFromWithAsyncMapper",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.resolveCallbackAsync",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.findDeclaration",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.isAsyncDeclaration",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.findEnclosingClass",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.findClassMethod",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.isAsyncAwareLibraryCall",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.isInsideRxJsPipe",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.classifyMapResult",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.isMapResultHandledLater",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.findEnclosingFunctionBody",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.getCallbackEscalation",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.extractMethodName",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.isWithinSafePromiseWrapper",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.isCorrectAsyncReduce",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.hasPromiseInitialValue",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.hasAwaitExpression",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.getMethodSpecificMessage",
+        "D:\\codedrift\\src\\engines\\async-foreach-detector.ts#AsyncForEachDetector.getSuggestion"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893331
+    },
+    "D:\\codedrift\\src\\cli\\progress-dashboard.ts": {
+      "filePath": "D:\\codedrift\\src\\cli\\progress-dashboard.ts",
+      "contentHash": "fadb4f882a4ac9de",
+      "summaryIds": [
+        "D:\\codedrift\\src\\cli\\progress-dashboard.ts#moveCursorUp",
+        "D:\\codedrift\\src\\cli\\progress-dashboard.ts#ProgressDashboard.constructor",
+        "D:\\codedrift\\src\\cli\\progress-dashboard.ts#ProgressDashboard.start",
+        "D:\\codedrift\\src\\cli\\progress-dashboard.ts#ProgressDashboard.update",
+        "D:\\codedrift\\src\\cli\\progress-dashboard.ts#ProgressDashboard.stop",
+        "D:\\codedrift\\src\\cli\\progress-dashboard.ts#ProgressDashboard.callback",
+        "D:\\codedrift\\src\\cli\\progress-dashboard.ts#ProgressDashboard.render",
+        "D:\\codedrift\\src\\cli\\progress-dashboard.ts#ProgressDashboard.buildFrame",
+        "D:\\codedrift\\src\\cli\\progress-dashboard.ts#ProgressDashboard.padLine",
+        "D:\\codedrift\\src\\cli\\progress-dashboard.ts#ProgressDashboard.getPhaseExtra",
+        "D:\\codedrift\\src\\cli\\progress-dashboard.ts#ProgressDashboard.formatElapsed",
+        "D:\\codedrift\\src\\cli\\progress-dashboard.ts#ProgressDashboard.shortenPath"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893351
+    },
+    "D:\\codedrift\\src\\core\\smart-filters.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\smart-filters.ts",
+      "contentHash": "20e2ba1d19d099fb",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\smart-filters.ts#shouldAutoIgnore",
+        "D:\\codedrift\\src\\core\\smart-filters.ts#isLowPriorityIDOR",
+        "D:\\codedrift\\src\\core\\smart-filters.ts#isIntentionalFireAndForget",
+        "D:\\codedrift\\src\\core\\smart-filters.ts#isDevelopmentUtility",
+        "D:\\codedrift\\src\\core\\smart-filters.ts#isAcceptableEmptyCatch",
+        "D:\\codedrift\\src\\core\\smart-filters.ts#shouldBoostConfidence"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893360
+    },
+    "D:\\codedrift\\src\\core\\severity-adjuster.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\severity-adjuster.ts",
+      "contentHash": "95fd98ddbe632ed0",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\severity-adjuster.ts#adjustSeverity",
+        "D:\\codedrift\\src\\core\\severity-adjuster.ts#adjustSeverities"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893365
+    },
+    "D:\\codedrift\\src\\core\\risk-scorer.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\risk-scorer.ts",
+      "contentHash": "772206935506981f",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\risk-scorer.ts#calculateRiskScore",
+        "D:\\codedrift\\src\\core\\risk-scorer.ts#assignPriority",
+        "D:\\codedrift\\src\\core\\risk-scorer.ts#enrichIssueWithRisk"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893374
+    },
+    "D:\\codedrift\\src\\core\\parser.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\parser.ts",
+      "contentHash": "987028d4713c3173",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\parser.ts#parseFile",
+        "D:\\codedrift\\src\\core\\parser.ts#parseSource",
+        "D:\\codedrift\\src\\core\\parser.ts#determineScriptKind",
+        "D:\\codedrift\\src\\core\\parser.ts#traverse",
+        "D:\\codedrift\\src\\core\\parser.ts#findNodes",
+        "D:\\codedrift\\src\\core\\parser.ts#findNodesByPredicate",
+        "D:\\codedrift\\src\\core\\parser.ts#getLocation",
+        "D:\\codedrift\\src\\core\\parser.ts#getNodeText",
+        "D:\\codedrift\\src\\core\\parser.ts#isWithinNodeType",
+        "D:\\codedrift\\src\\core\\parser.ts#getImports"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893386
+    },
+    "D:\\codedrift\\src\\core\\html-report.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\html-report.ts",
+      "contentHash": "0d7a18666bb5014c",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\html-report.ts#generateHTMLReport",
+        "D:\\codedrift\\src\\core\\html-report.ts#renderIssuesWithGrouping",
+        "D:\\codedrift\\src\\core\\html-report.ts#renderIssues",
+        "D:\\codedrift\\src\\core\\html-report.ts#detectProjectRoot",
+        "D:\\codedrift\\src\\core\\html-report.ts#makeRelativePath",
+        "D:\\codedrift\\src\\core\\html-report.ts#escapeHtml"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893416
+    },
+    "D:\\codedrift\\src\\core\\formatter.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\formatter.ts",
+      "contentHash": "937986fb36ec7d44",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\formatter.ts#formatTerminal",
+        "D:\\codedrift\\src\\core\\formatter.ts#groupIssuesByEngine",
+        "D:\\codedrift\\src\\core\\formatter.ts#prioritizeIssues",
+        "D:\\codedrift\\src\\core\\formatter.ts#getRuleName",
+        "D:\\codedrift\\src\\core\\formatter.ts#formatIssueSummary",
+        "D:\\codedrift\\src\\core\\formatter.ts#getRiskBadge",
+        "D:\\codedrift\\src\\core\\formatter.ts#getConfidenceBadge",
+        "D:\\codedrift\\src\\core\\formatter.ts#formatJSON"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893449
+    },
+    "D:\\codedrift\\src\\core\\deduplicator.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\deduplicator.ts",
+      "contentHash": "bd35db31de760c48",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\deduplicator.ts#createFingerprint",
+        "D:\\codedrift\\src\\core\\deduplicator.ts#deduplicateIssues",
+        "D:\\codedrift\\src\\core\\deduplicator.ts#getDeduplicationStats",
+        "D:\\codedrift\\src\\core\\deduplicator.ts#deduplicateByMessage",
+        "D:\\codedrift\\src\\core\\deduplicator.ts#getTopIssues"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893460
+    },
+    "D:\\codedrift\\src\\core\\config.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\config.ts",
+      "contentHash": "679958d9611b68c6",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\config.ts#loadConfig",
+        "D:\\codedrift\\src\\core\\config.ts#findConfigFile",
+        "D:\\codedrift\\src\\core\\config.ts#mergeConfig",
+        "D:\\codedrift\\src\\core\\config.ts#getDefaultConfig",
+        "D:\\codedrift\\src\\core\\config.ts#isRuleEnabled",
+        "D:\\codedrift\\src\\core\\config.ts#getRuleSeverity",
+        "D:\\codedrift\\src\\core\\config.ts#meetsConfidenceThreshold"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893470
+    },
+    "D:\\codedrift\\src\\core\\baseline.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\baseline.ts",
+      "contentHash": "fdde4d884af8ba1a",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\baseline.ts#generateFingerprint",
+        "D:\\codedrift\\src\\core\\baseline.ts#loadBaseline",
+        "D:\\codedrift\\src\\core\\baseline.ts#saveBaseline",
+        "D:\\codedrift\\src\\core\\baseline.ts#filterNewIssues",
+        "D:\\codedrift\\src\\core\\baseline.ts#getDefaultBaselinePath"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893482
+    },
+    "D:\\codedrift\\src\\core\\ast-traversal.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\ast-traversal.ts",
+      "contentHash": "ee5e85c6ada32e90",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\ast-traversal.ts#findAncestor",
+        "D:\\codedrift\\src\\core\\ast-traversal.ts#findAncestor",
+        "D:\\codedrift\\src\\core\\ast-traversal.ts#findAncestor",
+        "D:\\codedrift\\src\\core\\ast-traversal.ts#traverseUntil",
+        "D:\\codedrift\\src\\core\\ast-traversal.ts#containsNode"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893487
+    },
+    "D:\\codedrift\\src\\core\\ast-parser.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\ast-parser.ts",
+      "contentHash": "dd0f2dceec0f3b6d",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\ast-parser.ts#parseESTree",
+        "D:\\codedrift\\src\\core\\ast-parser.ts#clearASTCache",
+        "D:\\codedrift\\src\\core\\ast-parser.ts#traverseESTree"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893491
+    },
+    "D:\\codedrift\\src\\core\\analyzer.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\analyzer.ts",
+      "contentHash": "d4fb9f16419ebe20",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\analyzer.ts#analyzeProject",
+        "D:\\codedrift\\src\\core\\analyzer.ts#discoverFiles"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893515
+    },
+    "D:\\codedrift\\src\\engines\\input-validation\\validation-checking.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\input-validation\\validation-checking.ts",
+      "contentHash": "b34e3925c6ff65fd",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\input-validation\\validation-checking.ts#detectValidationImports",
+        "D:\\codedrift\\src\\engines\\input-validation\\validation-checking.ts#hasValidationInHandler",
+        "D:\\codedrift\\src\\engines\\input-validation\\validation-checking.ts#getManuallyValidatedFields"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893524
+    },
+    "D:\\codedrift\\src\\engines\\input-validation\\usage-tracking.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\input-validation\\usage-tracking.ts",
+      "contentHash": "ceffe638e75fbb26",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\input-validation\\usage-tracking.ts#findRequestDataUsage",
+        "D:\\codedrift\\src\\engines\\input-validation\\usage-tracking.ts#collectFieldNames",
+        "D:\\codedrift\\src\\engines\\input-validation\\usage-tracking.ts#extractExpressValidatorFields",
+        "D:\\codedrift\\src\\engines\\input-validation\\usage-tracking.ts#findValidatedVariables",
+        "D:\\codedrift\\src\\engines\\input-validation\\usage-tracking.ts#getCallMethodName",
+        "D:\\codedrift\\src\\engines\\input-validation\\usage-tracking.ts#isKnownSafeCall"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893544
+    },
+    "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts": {
+      "filePath": "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts",
+      "contentHash": "4e7c655c568a4230",
+      "summaryIds": [
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#findRouteHandlers",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#checkExpressStyleRoute",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#detectHandlerFramework",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#checkHapiStyleRoute",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#checkNestJSStyleRoute",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#checkTRPCRoute",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#isGraphQLResolver",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#hasFastifySchemaValidation",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#hasHapiValidateConfig",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#hasGlobalValidationMiddleware",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#isValidationMiddlewareNode",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#isValidationCallExpression",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#getRootCallOfChain",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#isValidationIdentifier",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#hasValidationMiddleware",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#getObjectName",
+        "D:\\codedrift\\src\\engines\\input-validation\\route-detection.ts#isAsyncFunction"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893582
+    },
+    "D:\\codedrift\\src\\core\\taint\\types.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\types.ts",
+      "contentHash": "3a6eb99e43f3f4ef",
+      "summaryIds": [],
+      "dependencies": [],
+      "timestamp": 1772916893585
+    },
+    "D:\\codedrift\\src\\core\\taint\\taint-analyzer.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\taint-analyzer.ts",
+      "contentHash": "e1fa89c713b62db4",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\taint-analyzer.ts#TaintAnalyzer.analyzeScope",
+        "D:\\codedrift\\src\\core\\taint\\taint-analyzer.ts#TaintAnalyzer.isExpressionTainted",
+        "D:\\codedrift\\src\\core\\taint\\taint-analyzer.ts#TaintAnalyzer.buildFlowsForSink",
+        "D:\\codedrift\\src\\core\\taint\\taint-analyzer.ts#TaintAnalyzer.findSanitizationsInScope",
+        "D:\\codedrift\\src\\core\\taint\\taint-analyzer.ts#TaintAnalyzer.collectTaintedIdentifiers"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893593
+    },
+    "D:\\codedrift\\src\\core\\taint\\source-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\source-detector.ts",
+      "contentHash": "51218f3d96da51f6",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.detectSources",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.walk",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.visitNode",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.checkPropertyAccess",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.checkDestructuringOrAlias",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.checkNestJSDecorator",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.checkSpread",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.matchSourcePattern",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.matchKoaRequestBody",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.resolveInitializerKind",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.resolveExpressionKind",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.extractBindingNames",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.buildPropertyLabel",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.isPartOfVariableInit",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.isPartOfSpread",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.isDescendantOf",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.createSource",
+        "D:\\codedrift\\src\\core\\taint\\source-detector.ts#TaintSourceDetector.nextId"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893608
+    },
+    "D:\\codedrift\\src\\core\\taint\\sink-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\sink-detector.ts",
+      "contentHash": "0bb903d1344bed46",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\sink-detector.ts#TaintSinkDetector.detectSinks",
+        "D:\\codedrift\\src\\core\\taint\\sink-detector.ts#TaintSinkDetector.classifyCall",
+        "D:\\codedrift\\src\\core\\taint\\sink-detector.ts#TaintSinkDetector.classifyPropertyAccess",
+        "D:\\codedrift\\src\\core\\taint\\sink-detector.ts#TaintSinkDetector.looksLikeFsOrPath",
+        "D:\\codedrift\\src\\core\\taint\\sink-detector.ts#TaintSinkDetector.looksLikeChildProcess",
+        "D:\\codedrift\\src\\core\\taint\\sink-detector.ts#TaintSinkDetector.looksLikeResponse",
+        "D:\\codedrift\\src\\core\\taint\\sink-detector.ts#TaintSinkDetector.firstArgIsStringLike",
+        "D:\\codedrift\\src\\core\\taint\\sink-detector.ts#TaintSinkDetector.makeSink"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893618
+    },
+    "D:\\codedrift\\src\\core\\taint\\sanitizer-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\sanitizer-detector.ts",
+      "contentHash": "aedc3eda281acd8f",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\sanitizer-detector.ts#SanitizerDetector.checkSanitization",
+        "D:\\codedrift\\src\\core\\taint\\sanitizer-detector.ts#SanitizerDetector.classifyCall",
+        "D:\\codedrift\\src\\core\\taint\\sanitizer-detector.ts#SanitizerDetector.looksLikeSchema",
+        "D:\\codedrift\\src\\core\\taint\\sanitizer-detector.ts#SanitizerDetector.looksLikeAllowlist",
+        "D:\\codedrift\\src\\core\\taint\\sanitizer-detector.ts#SanitizerDetector.switchHasStringCases",
+        "D:\\codedrift\\src\\core\\taint\\sanitizer-detector.ts#SanitizerDetector.hasPlaceholders",
+        "D:\\codedrift\\src\\core\\taint\\sanitizer-detector.ts#SanitizerDetector.isRegexCondition",
+        "D:\\codedrift\\src\\core\\taint\\sanitizer-detector.ts#SanitizerDetector.isUsedAsCondition",
+        "D:\\codedrift\\src\\core\\taint\\sanitizer-detector.ts#SanitizerDetector.makePoint"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893636
+    },
+    "D:\\codedrift\\src\\core\\taint\\propagation-tracker.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\propagation-tracker.ts",
+      "contentHash": "d7fc92e56d700ba2",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\propagation-tracker.ts#TaintPropagationTracker.constructor",
+        "D:\\codedrift\\src\\core\\taint\\propagation-tracker.ts#TaintPropagationTracker.trackPropagation",
+        "D:\\codedrift\\src\\core\\taint\\propagation-tracker.ts#TaintPropagationTracker.isTainted",
+        "D:\\codedrift\\src\\core\\taint\\propagation-tracker.ts#TaintPropagationTracker.getTaintSources",
+        "D:\\codedrift\\src\\core\\taint\\propagation-tracker.ts#TaintPropagationTracker.getVariableStates",
+        "D:\\codedrift\\src\\core\\taint\\propagation-tracker.ts#TaintPropagationTracker.walkNode",
+        "D:\\codedrift\\src\\core\\taint\\propagation-tracker.ts#TaintPropagationTracker.processVariableDeclaration",
+        "D:\\codedrift\\src\\core\\taint\\propagation-tracker.ts#TaintPropagationTracker.processAssignment",
+        "D:\\codedrift\\src\\core\\taint\\propagation-tracker.ts#TaintPropagationTracker.resolveExpressionTaint",
+        "D:\\codedrift\\src\\core\\taint\\propagation-tracker.ts#TaintPropagationTracker.getVariableTaint",
+        "D:\\codedrift\\src\\core\\taint\\propagation-tracker.ts#TaintPropagationTracker.markTainted",
+        "D:\\codedrift\\src\\core\\taint\\propagation-tracker.ts#TaintPropagationTracker.classifyPropagation",
+        "D:\\codedrift\\src\\core\\taint\\propagation-tracker.ts#TaintPropagationTracker.dedupe"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893651
+    },
+    "D:\\codedrift\\src\\core\\taint\\index.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\index.ts",
+      "contentHash": "e24002fa194156d9",
+      "summaryIds": [],
+      "dependencies": [],
+      "timestamp": 1772916893653
+    },
+    "D:\\codedrift\\src\\core\\taint\\summaries\\summary-types.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\summaries\\summary-types.ts",
+      "contentHash": "e5b70129c9c70c50",
+      "summaryIds": [],
+      "dependencies": [],
+      "timestamp": 1772916893655
+    },
+    "D:\\codedrift\\src\\core\\taint\\summaries\\summary-store.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\summaries\\summary-store.ts",
+      "contentHash": "97c70ddb982f0b17",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-store.ts#SummaryStore.add",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-store.ts#SummaryStore.addAll",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-store.ts#SummaryStore.get",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-store.ts#SummaryStore.getForFile",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-store.ts#SummaryStore.removeFile",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-store.ts#SummaryStore.has",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-store.ts#SummaryStore.getAllIds",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-store.ts#SummaryStore.getStats",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-store.ts#SummaryStore.serialize",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-store.ts#SummaryStore.deserialize",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-store.ts#SummaryStore.clear",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-store.ts#SummaryStore.size"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893662
+    },
+    "D:\\codedrift\\src\\core\\taint\\summaries\\summary-resolver.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\summaries\\summary-resolver.ts",
+      "contentHash": "f753fda3b401024e",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-resolver.ts#transferKey",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-resolver.ts#sinkHitKey",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-resolver.ts#inputKey",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-resolver.ts#outputKey",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-resolver.ts#composeSanitizations",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-resolver.ts#SummaryResolver.constructor",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-resolver.ts#SummaryResolver.resolve",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-resolver.ts#SummaryResolver.getCrossFileFlows",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-resolver.ts#SummaryResolver.buildReverseCallGraph",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-resolver.ts#SummaryResolver.resolveSummary",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-resolver.ts#SummaryResolver.composeTransfer",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-resolver.ts#SummaryResolver.composeTransitiveSinkHit",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-resolver.ts#SummaryResolver.traceBackward"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893702
+    },
+    "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts",
+      "contentHash": "d2d9de9f2ca93d60",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.buildFileSummaries",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.buildFunctionSummary",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.visitFileLevel",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.walkBody",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.processDeclaration",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.processAssignment",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.processReturn",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.processParamMutation",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.processCall",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.processNewExpression",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.processSanitizer",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.detectTaintSource",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.convertEffectsToSummary",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.detectSanitizerFunction",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.resolveExprTaint",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.classifyCallAsSink",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.classifyCallAsSanitizer",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.resolveCalleeId",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.resolveReturnMapping",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.isTaintSanitized",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.isTaintSanitizedForParam",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.collectSanitizations",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.collectSanitizationsForParam",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.seedParamTaint",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.extractFunctionName",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.extractParamNames",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.isAsyncFunction",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.hasExportModifier",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.getContainingClassName",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.isFunctionLike",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.getRootIdentifier",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.getAccessPath",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.getLineNumber",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.makeParamInput",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.inferConfidence",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.looksLikeFsOrPath",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.looksLikeChildProcess",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.looksLikeResponse",
+        "D:\\codedrift\\src\\core\\taint\\summaries\\summary-builder.ts#SummaryBuilder.looksLikeSchema"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893811
+    },
+    "D:\\codedrift\\src\\core\\taint\\reporting\\sarif-emitter.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\reporting\\sarif-emitter.ts",
+      "contentHash": "109705e8d2d8eb8e",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\reporting\\sarif-emitter.ts#SarifEmitter.emit",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\sarif-emitter.ts#SarifEmitter.writeToFile",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\sarif-emitter.ts#SarifEmitter.flowToResult",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\sarif-emitter.ts#SarifEmitter.generateRules",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\sarif-emitter.ts#SarifEmitter.stepToLocation",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\sarif-emitter.ts#SarifEmitter.stepKinds",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\sarif-emitter.ts#SarifEmitter.nestingLevel",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\sarif-emitter.ts#SarifEmitter.mapLevel",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\sarif-emitter.ts#SarifEmitter.defaultLevel"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893825
+    },
+    "D:\\codedrift\\src\\core\\taint\\reporting\\flow-renderer.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\reporting\\flow-renderer.ts",
+      "contentHash": "7d7f22e3d74f0657",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\reporting\\flow-renderer.ts#FlowRenderer.renderFlow",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\flow-renderer.ts#FlowRenderer.renderReport",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\flow-renderer.ts#FlowRenderer.renderCompact",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\flow-renderer.ts#FlowRenderer.getSuggestion",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\flow-renderer.ts#FlowRenderer.getSeverity",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\flow-renderer.ts#FlowRenderer.buildSummaryLine",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\flow-renderer.ts#FlowRenderer.buildChainLabel",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\flow-renderer.ts#FlowRenderer.buildTraceBody",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\flow-renderer.ts#FlowRenderer.getStepLabel",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\flow-renderer.ts#FlowRenderer.buildMarker",
+        "D:\\codedrift\\src\\core\\taint\\reporting\\flow-renderer.ts#FlowRenderer.severityOrder"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893841
+    },
+    "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts",
+      "contentHash": "a2097b40b28d1645",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#meetsMinConfidence",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#inputAccessPath",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#outputAccessPath",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#inputMatchesParam",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#deduplicateResults",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#sinkDescription",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#sourceDescription",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.constructor",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.findAllFlows",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.queryFromSource",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.queryFromSink",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.getFlowSummary",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.walkForwardFromSource",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.collectLocalSinks",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.followCallEdgesForward",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.followCallEdgesForwardFromParam",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.collectSinksForParam",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.followReturnToCallers",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.walkBackward",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.walkBackwardThroughCallers",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.taintedParamsViaEdge",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.outputReachesInput",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.combineConfidence",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.buildResult",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.uniqueSanitizations",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.normalizeOptions",
+        "D:\\codedrift\\src\\core\\taint\\query\\taint-query.ts#TaintQueryEngine.applyFilters"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893932
+    },
+    "D:\\codedrift\\src\\core\\taint\\incremental\\incremental-engine.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\incremental\\incremental-engine.ts",
+      "contentHash": "733f3f6170aaa95f",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\incremental\\incremental-engine.ts#IncrementalEngine.constructor",
+        "D:\\codedrift\\src\\core\\taint\\incremental\\incremental-engine.ts#IncrementalEngine.loadCache",
+        "D:\\codedrift\\src\\core\\taint\\incremental\\incremental-engine.ts#IncrementalEngine.saveCache",
+        "D:\\codedrift\\src\\core\\taint\\incremental\\incremental-engine.ts#IncrementalEngine.clearCache",
+        "D:\\codedrift\\src\\core\\taint\\incremental\\incremental-engine.ts#IncrementalEngine.getStaleFiles",
+        "D:\\codedrift\\src\\core\\taint\\incremental\\incremental-engine.ts#IncrementalEngine.computeHash",
+        "D:\\codedrift\\src\\core\\taint\\incremental\\incremental-engine.ts#IncrementalEngine.updateCache",
+        "D:\\codedrift\\src\\core\\taint\\incremental\\incremental-engine.ts#IncrementalEngine.removeFromCache",
+        "D:\\codedrift\\src\\core\\taint\\incremental\\incremental-engine.ts#IncrementalEngine.getCascadeInvalidations",
+        "D:\\codedrift\\src\\core\\taint\\incremental\\incremental-engine.ts#IncrementalEngine.getCachedSummaries",
+        "D:\\codedrift\\src\\core\\taint\\incremental\\incremental-engine.ts#IncrementalEngine.storeSummary",
+        "D:\\codedrift\\src\\core\\taint\\incremental\\incremental-engine.ts#IncrementalEngine.ensureManifest",
+        "D:\\codedrift\\src\\core\\taint\\incremental\\incremental-engine.ts#IncrementalEngine.createEmptyManifest"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893950
+    },
+    "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts",
+      "contentHash": "0242a195c4d33e19",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.constructor",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.taint",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.sanitize",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.query",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.queryInternal",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.queryParentTaint",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.queryAliasesForParent",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.queryWildcard",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.queryAliases",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.isTainted",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.getTaintSources",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.alias",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.destructure",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.spreadMerge",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.arrayWrite",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.mapWrite",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.setReturn",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.getReturn",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.fork",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.join",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.getAllTaintedPaths",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.clear",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.getStats",
+        "D:\\codedrift\\src\\core\\taint\\heap\\heap-model.ts#HeapModel.pathFromKey"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893979
+    },
+    "D:\\codedrift\\src\\core\\taint\\heap\\access-path.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\heap\\access-path.ts",
+      "contentHash": "195bf09cc6037e77",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\heap\\access-path.ts#AccessPath.constructor",
+        "D:\\codedrift\\src\\core\\taint\\heap\\access-path.ts#AccessPath.fromExpression",
+        "D:\\codedrift\\src\\core\\taint\\heap\\access-path.ts#AccessPath.startsWith",
+        "D:\\codedrift\\src\\core\\taint\\heap\\access-path.ts#AccessPath.parent",
+        "D:\\codedrift\\src\\core\\taint\\heap\\access-path.ts#AccessPath.append",
+        "D:\\codedrift\\src\\core\\taint\\heap\\access-path.ts#AccessPath.depth",
+        "D:\\codedrift\\src\\core\\taint\\heap\\access-path.ts#AccessPath.wildcard",
+        "D:\\codedrift\\src\\core\\taint\\heap\\access-path.ts#AccessPath.toString",
+        "D:\\codedrift\\src\\core\\taint\\heap\\access-path.ts#AccessPath.equals",
+        "D:\\codedrift\\src\\core\\taint\\heap\\access-path.ts#AccessPath.matches",
+        "D:\\codedrift\\src\\core\\taint\\heap\\access-path.ts#AccessPath.clone",
+        "D:\\codedrift\\src\\core\\taint\\heap\\access-path.ts#WildcardAccessPath.matches",
+        "D:\\codedrift\\src\\core\\taint\\heap\\access-path.ts#WildcardAccessPath.clone"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916893986
+    },
+    "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts",
+      "contentHash": "3e812c498d87e1b7",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts#SymbolTable.registerFile",
+        "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts#SymbolTable.getSymbol",
+        "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts#SymbolTable.getExportedSymbol",
+        "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts#SymbolTable.getFileSymbols",
+        "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts#SymbolTable.registerCallSite",
+        "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts#SymbolTable.getCallersOf",
+        "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts#SymbolTable.getCalleesOf",
+        "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts#SymbolTable.registerInheritance",
+        "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts#SymbolTable.getClassHierarchy",
+        "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts#SymbolTable.resolveMethodDispatch",
+        "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts#SymbolTable.clear",
+        "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts#SymbolTable.getStats",
+        "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts#SymbolTable.registerExportBinding",
+        "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts#SymbolTable.registerSingleExport",
+        "D:\\codedrift\\src\\core\\taint\\graph\\symbol-table.ts#SymbolTable.findObjectLiteral"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916894001
+    },
+    "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts",
+      "contentHash": "d14829fe0c6cd09c",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.constructor",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.build",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.update",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.resolveCall",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.getCallers",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.traceImport",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.getResolver",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.getFileIndex",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.getSymbolTable",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.getStats",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.processFile",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.resolveInheritance",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.discoverCallSites",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.walkForCallSites",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.resolveNewExpression",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.resolveIdentifier",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.findContainingClass",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.isNewExpressionCall",
+        "D:\\codedrift\\src\\core\\taint\\graph\\project-graph.ts#ProjectGraph.deduplicateResults"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916894044
+    },
+    "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts",
+      "contentHash": "eaed6542069581ac",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.constructor",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.resolveSpecifier",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.collectBindings",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.resolveDynamic",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.resolveReExportChain",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.resolveSpecifierUncached",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.tryResolveFile",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.hasKnownExtension",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.normalizePath",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.visitNode",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.collectESImport",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.collectESExportDeclaration",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.collectExportAssignment",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.collectExportedDeclaration",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.collectRequireImport",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.collectCJSExport",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.collectExportsPropertyExport",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.isRequireCall",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.isDynamicImportCall",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.isModuleExportsAssignment",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.isExportsPropertyAssignment",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.hasExportModifier",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.hasDefaultModifier",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.buildDynamicSite",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.extractConcatPrefix",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.tryBackwardSlice",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.readFileContent",
+        "D:\\codedrift\\src\\core\\taint\\graph\\module-resolver.ts#ModuleResolver.getScriptKind"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916894087
+    },
+    "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts",
+      "contentHash": "abf13e37eb1bd09a",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#hasModifier",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#isExportedNode",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#isAsync",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#isGenerator",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#paramCount",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#contentHash",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#isVariableStatementExported",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#FileIndex.indexFile",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#FileIndex.getEntry",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#FileIndex.isStale",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#FileIndex.removeFile",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#FileIndex.getAllFiles",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#FileIndex.indexFiles",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#FileIndex.findFunction",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#FileIndex.findClass",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#FileIndex.clear",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#FileIndex.processTopLevelStatement",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#FileIndex.extractVariableFunction",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#FileIndex.extractClass",
+        "D:\\codedrift\\src\\core\\taint\\graph\\file-index.ts#FileIndex.extractClassLike"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916894123
+    },
+    "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts",
+      "contentHash": "715fe320cd3f03f4",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts#NextJSModel.detect",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts#NextJSModel.extractRoutes",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts#NextJSModel.analyzeChain",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts#NextJSModel.getHandlerSources",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts#NextJSModel.hasNextImport",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts#NextJSModel.hasServerDirective",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts#NextJSModel.extractAppRouterRoutes",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts#NextJSModel.extractPagesApiRoute",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts#NextJSModel.extractMiddleware",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts#NextJSModel.extractServerActions",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts#NextJSModel.getExportedFunction",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts#NextJSModel.inferRoutePathFromFile",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts#NextJSModel.isServerActionParam",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nextjs-model.ts#getParamName"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916894144
+    },
+    "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts",
+      "contentHash": "018e532c08dcf0ef",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#NestJSModel.detect",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#NestJSModel.extractRoutes",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#NestJSModel.analyzeChain",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#NestJSModel.getHandlerSources",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#NestJSModel.hasNestImport",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#NestJSModel.hasNestDecorators",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#NestJSModel.extractMethodRoutes",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#NestJSModel.extractChainFromDecorators",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#NestJSModel.extractChainElement",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#NestJSModel.getDecoratorStringArg",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#NestJSModel.getDecoratorArgString",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#getDecorators",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#getDecoratorName",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#getDecoratorCallArgs",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#getExpressionName",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\nestjs-model.ts#joinPaths"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916894177
+    },
+    "D:\\codedrift\\src\\core\\taint\\frameworks\\framework-model.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\frameworks\\framework-model.ts",
+      "contentHash": "0671c9c3bf9ae9cd",
+      "summaryIds": [],
+      "dependencies": [],
+      "timestamp": 1772916894179
+    },
+    "D:\\codedrift\\src\\core\\taint\\frameworks\\framework-detector.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\frameworks\\framework-detector.ts",
+      "contentHash": "d6ed21ad6163d6d0",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\framework-detector.ts#FrameworkDetector.detectFrameworks",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\framework-detector.ts#FrameworkDetector.allModels"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916894185
+    },
+    "D:\\codedrift\\src\\core\\taint\\frameworks\\express-model.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\frameworks\\express-model.ts",
+      "contentHash": "cedde59be896e486",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\express-model.ts#ExpressModel.detect",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\express-model.ts#ExpressModel.extractRoutes",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\express-model.ts#ExpressModel.analyzeChain",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\express-model.ts#ExpressModel.getHandlerSources",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\express-model.ts#ExpressModel.hasExpressImport",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\express-model.ts#ExpressModel.hasRouterCalls",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\express-model.ts#ExpressModel.walkForRoutes",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\express-model.ts#ExpressModel.tryExtractRoute",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\express-model.ts#ExpressModel.extractHandler",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\express-model.ts#ExpressModel.analyzeInlineMiddleware",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\express-model.ts#isRequireCall",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\express-model.ts#getCallName",
+        "D:\\codedrift\\src\\core\\taint\\frameworks\\express-model.ts#inferSanitizationKind"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916894200
+    },
+    "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts",
+      "contentHash": "ecd356a735d55f33",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.constructor",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.processStatement",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.resolveExpressionTaint",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.processVariableDeclaration",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.processAssignment",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.processCallExpression",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.processReturnStatement",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.detectTaintSource",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.processTemplateLiteral",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.processBinaryExpression",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.classifyCallAsSink",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.classifyCallAsSanitizer",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.resolveCalleeId",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.getCalleeName",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.getLineNumber",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.processExpressionNode",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.unionArgTaint",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#TransferFunctions.collectTaintSources",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\transfer-functions.ts#isAssignmentOperator"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916894243
+    },
+    "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts",
+      "contentHash": "f8959a54969927ba",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#PathSensitivityAnalyzer.constructor",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#PathSensitivityAnalyzer.analyzeBranch",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#PathSensitivityAnalyzer.addValidationPattern",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#PathSensitivityAnalyzer.analyzeExpression",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#PathSensitivityAnalyzer.analyzeTypeof",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#PathSensitivityAnalyzer.analyzeEquality",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#PathSensitivityAnalyzer.analyzeCall",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#PathSensitivityAnalyzer.analyzeRegexTest",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#PathSensitivityAnalyzer.analyzeMethodCall",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#PathSensitivityAnalyzer.analyzeInstanceOf",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#PathSensitivityAnalyzer.analyzeLogicalAnd",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#PathSensitivityAnalyzer.analyzeLogicalOr",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#PathSensitivityAnalyzer.matchPattern",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#buildDefaultPatterns",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#flipRefinement",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#extractVarName",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#extractCallName",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#extractTypeofPair",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#extractVarAndLiteral",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#asLiteralValue",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#matchGlobString",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\path-sensitivity.ts#mergeActions"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916894265
+    },
+    "D:\\codedrift\\src\\core\\taint\\dataflow\\lattice.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\dataflow\\lattice.ts",
+      "contentHash": "3cce3db08fe96cc9",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\lattice.ts#join",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\lattice.ts#meet",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\lattice.ts#isLeq",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\lattice.ts#joinFacts",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\lattice.ts#meetFacts",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\lattice.ts#createTaintedFact",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\lattice.ts#createUntaintedFact",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\lattice.ts#createBottomFact",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\lattice.ts#isTainted"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916894273
+    },
+    "D:\\codedrift\\src\\core\\taint\\dataflow\\index.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\dataflow\\index.ts",
+      "contentHash": "05bb05b44c13172e",
+      "summaryIds": [],
+      "dependencies": [],
+      "timestamp": 1772916894274
+    },
+    "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts",
+      "contentHash": "20d8848bf2a96113",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.constructor",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.build",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.getDefinitions",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.getUses",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.getBlockDefs",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.getBlockUses",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.computeReachingDefinitions",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.getReachingDefs",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.getChains",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.getAllVariables",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.scanNode",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.scanForDefs",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.visitForDefs",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.scanForUses",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.visitForUses",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.extractBindingPatternDefs",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.extractDestructuringAssignmentDefs",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.extractForBindingDefs",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.extractImportDefs",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.classifyUse",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.isDefTarget",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.isPropertyName",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.isLabel",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.isTypePosition",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.isNestedFunctionBoundary",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.isCompoundAssignment",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.computeGenKill",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.getActiveDefsAtUse",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.addDef",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.addUse",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\def-use.ts#DefUseAnalyzer.clear"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916894317
+    },
+    "D:\\codedrift\\src\\core\\taint\\dataflow\\dataflow-solver.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\dataflow\\dataflow-solver.ts",
+      "contentHash": "c794f8e9c2b8e339",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\dataflow-solver.ts#DataFlowSolver.constructor",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\dataflow-solver.ts#DataFlowSolver.solve",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\dataflow-solver.ts#DataFlowSolver.computeReversePostorder",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\dataflow-solver.ts#DataFlowSolver.buildPredecessorMap",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\dataflow-solver.ts#DataFlowSolver.joinPredecessorStates",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\dataflow-solver.ts#DataFlowSolver.applyBranchRefinements",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\dataflow-solver.ts#DataFlowSolver.extractBranchCondition",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\dataflow-solver.ts#DataFlowSolver.applyRefinement",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\dataflow-solver.ts#DataFlowSolver.processBlock",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\dataflow-solver.ts#DataFlowSolver.shouldWiden",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\dataflow-solver.ts#DataFlowSolver.widenState",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\dataflow-solver.ts#DataFlowSolver.effectKey"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916894349
+    },
+    "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts",
+      "contentHash": "4b1af9932d582542",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.constructor",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.getVar",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.setVar",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.hasVar",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.getAllVars",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.taintField",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.sanitizeField",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.isFieldTainted",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.addAlias",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.clone",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.join",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.equals",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.createEntryState",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.getParamSources",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.isSanitized",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#AbstractState.getSanitizations",
+        "D:\\codedrift\\src\\core\\taint\\dataflow\\abstract-state.ts#factsEqual"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916894363
+    },
+    "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-types.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-types.ts",
+      "contentHash": "4ba79722da4cdca9",
+      "summaryIds": [],
+      "dependencies": [],
+      "timestamp": 1772916894364
+    },
+    "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts": {
+      "filePath": "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts",
+      "contentHash": "30a2bf3fbcc5baf6",
+      "summaryIds": [
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.build",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.computeDominators",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.markReachable",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.reset",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.newBlock",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.addEdge",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.sealBlock",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.startDisconnectedBlock",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.addStatementToCurrentBlock",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.isBlockTerminated",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.getFunctionBody",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processStatements",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processStatement",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processIfStatement",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processSwitchStatement",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.sealBlockOnTarget",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processForStatement",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processWhileStatement",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processDoWhileStatement",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processForInOfStatement",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processTryStatement",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processReturnStatement",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processThrowStatement",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processBreakStatement",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processContinueStatement",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.getPendingLabel",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processLabeledStatement",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processExpressionStatement",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processVariableStatement",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processExpression",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processShortCircuit",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processTernary",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.isOptionalChain",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.processOptionalChain",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.findBreakTarget",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.findContinueTarget",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.getEnclosingCatch",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.getEnclosingFinally",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.hasShortCircuit",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.buildEdgeMaps",
+        "D:\\codedrift\\src\\core\\taint\\cfg\\cfg-builder.ts#CFGBuilder.reversePostOrder"
+      ],
+      "dependencies": [],
+      "timestamp": 1772916894401
+    }
+  },
+  "summaries": {}
+}

@@ -142,6 +142,47 @@ export abstract class BaseEngine implements AnalysisEngine {
   }
 
   /**
+   * Check taint status of an expression within a scope.
+   * Returns null if taint analysis is unavailable.
+   */
+  protected checkTaint(
+    context: AnalysisContext,
+    expr: ts.Node,
+    scopeNode: ts.Node,
+  ): { tainted: boolean; sourceKinds: string[]; sanitized: boolean } | null {
+    if (!context.taintAnalyzer) return null;
+    return context.taintAnalyzer.isExpressionTainted(expr, scopeNode);
+  }
+
+  /**
+   * Run full taint flow analysis on a scope (function/method body).
+   * Returns null if taint analysis is unavailable.
+   */
+  protected analyzeTaintFlows(context: AnalysisContext, scopeNode: ts.Node) {
+    if (!context.taintAnalyzer) return null;
+    return context.taintAnalyzer.analyzeScope(scopeNode);
+  }
+
+  /**
+   * Query cross-file taint flows for the current file.
+   * Returns all flows where this file's functions are involved as source or sink.
+   */
+  protected queryCrossFileTaint(context: AnalysisContext) {
+    if (!context.crossFileTaint) return null;
+    return context.crossFileTaint.queryEngine.findAllFlows({
+      includeSanitized: false,
+    });
+  }
+
+  /**
+   * Resolve a call expression to its cross-file target symbol(s).
+   */
+  protected resolveCallTarget(context: AnalysisContext, call: ts.CallExpression) {
+    if (!context.crossFileTaint) return null;
+    return context.crossFileTaint.projectGraph.resolveCall(call, context.filePath);
+  }
+
+  /**
    * Get human-readable severity label
    */
   protected getSeverityLabel(severity: Severity): string {

@@ -67,12 +67,23 @@ export class EmptyCatchDetector extends BaseEngine {
         return null;
       }
 
+      // Skip if catch block has an intentional suppression comment
+      if (this.hasIntentionalSuppressionComment(block, context)) {
+        return null;
+      }
+
+      // Batch processing: try-catch inside a loop without break/return/throw
+      // is intentional continuation — process remaining items despite one failure
+      const inLoop = this.isInsideLoop(node) && !this.hasExitStatement(block);
+
       return this.createIssue(context, catchClause, 'Empty catch block silently swallows errors', {
-        severity: inMigration ? 'info' : 'error', // Downgrade for migrations
+        severity: inMigration || inLoop ? 'info' : 'error',
         suggestion: inMigration
           ? 'Consider logging migration rollback errors for debugging'
-          : 'Log error, re-throw, or handle appropriately',
-        confidence: inMigration ? 'low' : 'high', // Downgrade confidence for migrations
+          : inLoop
+            ? 'Consider logging errors to avoid silent failures in batch processing'
+            : 'Log error, re-throw, or handle appropriately',
+        confidence: inMigration || inLoop ? 'low' : 'high',
       });
     }
 
@@ -84,19 +95,25 @@ export class EmptyCatchDetector extends BaseEngine {
         return null;
       }
 
+      const inLoopEffEmpty = this.isInsideLoop(node) && !this.hasExitStatement(block);
       return this.createIssue(context, catchClause, 'Catch block only contains comments - errors swallowed', {
-        severity: 'error',
-        suggestion: 'Add error logging or handling logic',
-        confidence: 'high',
+        severity: inLoopEffEmpty ? 'info' : 'error',
+        suggestion: inLoopEffEmpty
+          ? 'Consider logging errors to avoid silent failures in batch processing'
+          : 'Add error logging or handling logic',
+        confidence: inLoopEffEmpty ? 'low' : 'high',
       });
     }
 
     // Check for silent void return
     if (this.hasOnlySilentReturn(block)) {
+      const inLoopReturn = this.isInsideLoop(node);
       return this.createIssue(context, catchClause, 'Catch block only returns - error silently ignored', {
-        severity: 'warning',
-        suggestion: 'Log error before returning',
-        confidence: 'medium',
+        severity: inLoopReturn ? 'info' : 'warning',
+        suggestion: inLoopReturn
+          ? 'Consider logging errors to avoid silent failures in batch processing'
+          : 'Log error before returning',
+        confidence: inLoopReturn ? 'low' : 'medium',
       });
     }
 
@@ -125,18 +142,48 @@ export class EmptyCatchDetector extends BaseEngine {
       return null;
     }
 
+    // Cleanup-only catch: catch block only calls cleanup/lifecycle methods
+    // (close, dispose, destroy, release, etc.) — downgrade to warning/low
+    if (this.isCleanupOnlyCatch(block)) {
+      return this.createIssue(context, catchClause, 'Catch block only performs cleanup without logging the error', {
+        severity: 'warning',
+        suggestion: 'Consider logging the error before cleanup',
+        confidence: 'low',
+      });
+    }
+
+    // Fallback pattern: catch block contains a non-console function call,
+    // indicating an alternative code path rather than empty swallowing.
+    // e.g., try { useNewFeature(); } catch (e) { useOldFeature(); }
+    if (this.hasFallbackCall(block)) {
+      return this.createIssue(context, catchClause, 'Catch block uses fallback but does not log the original error', {
+        severity: 'info',
+        suggestion: 'Consider logging the caught error for debugging',
+        confidence: 'low',
+      });
+    }
+
     // Check if only console.log (not production-ready)
     // NOTE: This check must come AFTER errorNotUsed to avoid duplicate reporting
     // A catch block with console.log but unused error would match both conditions
     const hasConsoleOnly = this.hasOnlyConsoleLog(block);
     const errorUnused = this.errorNotUsed(catchClause);
 
+    // Skip if catch block contains an intentional suppression comment
+    // (e.g. // silence, // ignore, /* empty */, // intentional, // expected, etc.)
+    if (errorUnused && this.hasIntentionalSuppressionComment(block, context)) {
+      return null;
+    }
+
     // Prioritize the more specific issue: unused error
     if (errorUnused) {
+      const inLoopUnused = this.isInsideLoop(node) && !this.hasExitStatement(block);
       return this.createIssue(context, catchClause, 'Error caught but never used or logged', {
-        severity: 'warning',
-        suggestion: 'Use error variable in logging or handling',
-        confidence: 'high',
+        severity: inLoopUnused ? 'info' : 'warning',
+        suggestion: inLoopUnused
+          ? 'Consider logging errors to avoid silent failures in batch processing'
+          : 'Use error variable in logging or handling',
+        confidence: inLoopUnused ? 'low' : 'high',
       });
     }
 
@@ -248,6 +295,7 @@ export class EmptyCatchDetector extends BaseEngine {
       if (ts.isCallExpression(node)) {
         const callText = node.expression.getText();
         const probePatterns = [
+          // Filesystem probes
           /\bfs\.access/,
           /\bfs\.stat/,
           /\bfs\.lstat/,
@@ -256,11 +304,39 @@ export class EmptyCatchDetector extends BaseEngine {
           /\bfs\.mkdir/,
           /\bfs\.unlink/,
           /\bfs\.rmdir/,
+          // Parse / require probes
           /\bJSON\.parse/,
           /\brequire\s*\(/,
           /\.exists\b/,
           /\.ping\b/,
           /\.connect\b/,
+          // Redis operations
+          /\bredis\.ping/,
+          /\bredis\.connect/,
+          /\bredis\.disconnect/,
+          // Database connection probes
+          /\bdb\.ping/,
+          /\bdb\.connect/,
+          /\bdb\.authenticate/,
+          /\bdb\.sync/,
+          // Socket / network probes
+          /\bsocket\.connect/,
+          /\bsocket\.close/,
+          /\bdns\.lookup/,
+          /\bdns\.resolve/,
+          /\bnet\.connect/,
+          /\bnet\.createConnection/,
+          // HTTP health-check probes
+          /\bhttp\.head/,
+          /\bhttp\.options/,
+          // ORM / database client connection probes
+          /\bmongoose\.connect/,
+          /\bsequelize\.authenticate/,
+          /\bprisma\.\$connect/,
+          // Cache operations (failure is non-critical)
+          /\bcache\.get/,
+          /\bcache\.set/,
+          /\bcache\.del/,
         ];
         if (probePatterns.some(p => p.test(callText))) {
           hasProbeCall = true;
@@ -268,6 +344,35 @@ export class EmptyCatchDetector extends BaseEngine {
       }
     });
     return hasProbeCall;
+  }
+
+  /**
+   * Check if the catch block contains a comment indicating intentional error suppression.
+   * Patterns: // silence, // ignore, // expected, // intentional, // no-op, // empty,
+   * // fallback, // fallthrough, // optional, // non-critical, // best-effort, etc.
+   */
+  private hasIntentionalSuppressionComment(block: ts.Block, context: AnalysisContext): boolean {
+    const blockStart = block.getStart();
+    const blockEnd = block.getEnd();
+    const blockText = context.sourceFile.text.slice(blockStart, blockEnd);
+
+    // Check for any comment (// or /* */) containing a suppression keyword anywhere
+    const commentPattern = /(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)/g;
+    const suppressionKeywords = /\b(?:silence|silent|ignore|ignored|intentional|intentionally|expected|no-?op|fallback|fall[\s-]?through|optional|non-?critical|best[\s-]?effort|noop|suppress|swallow|continue|which\s+is\s+fine|safe\s+to\s+ignore|already\s+(?:handled|dispatched|logged|reported))\b|@todo\b/i;
+
+    let match;
+    while ((match = commentPattern.exec(blockText)) !== null) {
+      const comment = match[0];
+      if (suppressionKeywords.test(comment)) return true;
+      // /* empty */ marker
+      if (/\/\*\s*empty\s*\*\//.test(comment)) return true;
+      // // ... (ellipsis placeholder)
+      if (/^\/\/\s*\.{3}\s*$/.test(comment.trim())) return true;
+      // Explanatory fallback: "if X fails", "use the base value", "falls back"
+      if (/\b(?:if\s+[\w\s]+fails|use\s+the\s+\w+|falls?\s+back)\b/i.test(comment)) return true;
+    }
+
+    return false;
   }
 
   /**
@@ -531,6 +636,124 @@ export class EmptyCatchDetector extends BaseEngine {
       return this.hasTerminalElse(stmt.elseStatement);
     }
     // Has a plain else block
+    return true;
+  }
+
+  /**
+   * Check if the catch block contains a non-console function call (fallback pattern).
+   * e.g., try { useNewFeature(); } catch (e) { useOldFeature(); }
+   * The catch invokes a different function, indicating a fallback — not truly "empty".
+   */
+  private hasFallbackCall(block: ts.Block): boolean {
+    for (const stmt of block.statements) {
+      if (!ts.isExpressionStatement(stmt)) continue;
+      const expr = stmt.expression;
+      if (!ts.isCallExpression(expr)) continue;
+
+      // Skip console.* calls — those aren't fallback behavior
+      if (ts.isPropertyAccessExpression(expr.expression)) {
+        const obj = this.getObjectName(expr.expression.expression);
+        if (obj === 'console') continue;
+      }
+
+      // Any other function call is a fallback / alternative path
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Check if the try-catch is inside a loop body (for, for..of, for..in, .forEach callback).
+   * When a try-catch is inside a loop and the catch doesn't break/return/throw,
+   * it's intentional continuation — process remaining items despite one failure.
+   */
+  private isInsideLoop(node: ts.Node): boolean {
+    let current = node.parent;
+    while (current) {
+      if (ts.isForStatement(current) ||
+          ts.isForOfStatement(current) ||
+          ts.isForInStatement(current) ||
+          ts.isWhileStatement(current) ||
+          ts.isDoStatement(current)) {
+        return true;
+      }
+
+      // Check for .forEach() callback: the try-catch is inside an arrow/function
+      // that is passed to a .forEach() call
+      if ((ts.isArrowFunction(current) || ts.isFunctionExpression(current)) &&
+          current.parent && ts.isCallExpression(current.parent)) {
+        const callExpr = current.parent.expression;
+        if (ts.isPropertyAccessExpression(callExpr) && callExpr.name.text === 'forEach') {
+          return true;
+        }
+      }
+
+      // Stop climbing at function boundaries (don't escape the enclosing function)
+      if (ts.isFunctionDeclaration(current) ||
+          ts.isMethodDeclaration(current) ||
+          ts.isArrowFunction(current) ||
+          ts.isFunctionExpression(current)) {
+        // We already checked forEach above; if we hit a function boundary
+        // without finding a loop, stop
+        break;
+      }
+
+      current = current.parent;
+    }
+    return false;
+  }
+
+  /**
+   * Check if the catch block contains a break, return, or throw statement.
+   * Used to distinguish intentional-continuation catches from ones that exit the loop.
+   */
+  private hasExitStatement(block: ts.Block): boolean {
+    let found = false;
+    traverse(block, (node) => {
+      if (found) return;
+      if (ts.isBreakStatement(node) || ts.isReturnStatement(node) || ts.isThrowStatement(node)) {
+        found = true;
+      }
+    });
+    return found;
+  }
+
+  /**
+   * Cleanup/lifecycle method names — if a catch block ONLY calls these,
+   * it's a cleanup-only catch and should be downgraded.
+   */
+  private static readonly CLEANUP_METHODS = new Set([
+    'close', 'dispose', 'destroy', 'release', 'cleanup',
+    'shutdown', 'disconnect', 'end', 'abort', 'cancel',
+    'unsubscribe', 'removeListener',
+  ]);
+
+  /**
+   * Check if all statements in the catch block are calls to cleanup/lifecycle methods.
+   */
+  private isCleanupOnlyCatch(block: ts.Block): boolean {
+    if (block.statements.length === 0) return false;
+
+    for (const stmt of block.statements) {
+      if (!ts.isExpressionStatement(stmt)) return false;
+      const expr = stmt.expression;
+
+      // Must be a call expression
+      if (!ts.isCallExpression(expr)) return false;
+
+      // Check if method name is a cleanup method
+      let methodName: string | null = null;
+      if (ts.isPropertyAccessExpression(expr.expression)) {
+        methodName = expr.expression.name.text;
+      } else if (ts.isIdentifier(expr.expression)) {
+        methodName = expr.expression.text;
+      }
+
+      if (!methodName || !EmptyCatchDetector.CLEANUP_METHODS.has(methodName)) {
+        return false;
+      }
+    }
+
     return true;
   }
 }

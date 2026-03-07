@@ -3,19 +3,19 @@
 [![npm version](https://badge.fury.io/js/codedrift.svg)](https://www.npmjs.com/package/codedrift)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-The integrity layer for AI-generated code. Catches the bugs that Copilot, Cursor and ChatGPT silently ship to production.
+The integrity layer for AI-generated code. Catches the bugs that Copilot, Cursor, ChatGPT and Claude silently ship to production.
 
-AI coding assistants are writing more production code every month. They're fast, fluent and confidently wrong. They generate async functions that never complete, import packages that don't exist, leak secrets in error responses and pass code review because it looks correct.
+AI coding assistants are writing more production code every month. They're fast, fluent and confidently wrong. They generate async functions that never complete, import packages that don't exist, leak secrets in error responses, introduce taint flows across module boundaries, and pass code review because the code looks correct.
 
-CodeDrift is the safety layer between AI-generated code and production. It detects the class of bugs that are syntactically valid but semantically dangerous, the ones that ESLint, TypeScript and human reviewers miss because the code reads fine.
+CodeDrift is the safety layer between AI-generated code and production. It performs cross-file taint analysis, CFG-driven data flow tracking, and semantic pattern detection to catch the class of bugs that are syntactically valid but semantically dangerous — the ones that ESLint, TypeScript and human reviewers miss because the code reads fine.
 
-## What's Actually Happening
+## Why This Exists
 
-### The Problem Getting Worse
+### AI Code Is Scaling Faster Than Human Review
 
-Every team using AI coding tools is accumulating structural debt they can't see. Missing awaits silently corrupt data. Hallucinated dependencies pass CI and crash in production. Stack traces with API keys leak through error handlers that look perfectly reasonable.
+Every team using Copilot, Cursor, Claude or ChatGPT is accumulating structural debt they can't see. Missing awaits silently corrupt data. Hallucinated dependencies pass CI and crash in production. Tainted user input flows through AI-generated service layers without a single validation check. Stack traces with API keys leak through error handlers that look perfectly reasonable.
 
-This isn't a tooling gap. It's a trust gap. Teams are shipping AI-written code faster than they can verify it. CodeDrift closes that gap not by slowing down AI adoption but by making it safe.
+This isn't a tooling gap. It's a trust gap. AI assistants generate code that compiles, passes linting, and reads correctly — but carries semantic bugs that only surface in production. CodeDrift closes that gap not by slowing down AI adoption but by making it safe.
 
 ## Quick Start
 
@@ -521,18 +521,70 @@ Examples:
 
 CodeDrift uses the TypeScript Compiler API to parse source code into an AST with full JSX/TSX support. Ten detection engines traverse the AST looking for semantically dangerous patterns — not just style issues.
 
-Architecture:
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  CLI Layer                                                      │
+│  Interactive dashboard · Progress tracking · CI/CD integration  │
+├─────────────────────────────────────────────────────────────────┤
+│  Core Analyzer                                                  │
+│  File discovery · Engine orchestration · Smart filters          │
+├─────────────────────────────────────────────────────────────────┤
+│  Detection Engines (10)                                         │
+│  IDOR · Input validation · Secrets · Missing await · Regex ...  │
+├─────────────────────────────────────────────────────────────────┤
+│  Cross-File Taint Analysis                                      │
+│  Project graph · Module resolver · Function summaries           │
+│  Multi-hop flow resolution · Summary store                      │
+├─────────────────────────────────────────────────────────────────┤
+│  Data Flow Analysis (CFG-driven)                                │
+│  Control flow graphs · Abstract interpretation · Fixpoint       │
+│  Path sensitivity · Field sensitivity · Def-use chains          │
+├─────────────────────────────────────────────────────────────────┤
+│  Post-Processing                                                │
+│  Smart auto-ignore · Confidence scoring · Severity adjustment   │
+│  Risk scoring · Deduplication                                   │
+├─────────────────────────────────────────────────────────────────┤
+│  Output                                                         │
+│  Terminal · JSON · HTML · SARIF · Baseline diff                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 - **Parser**: Converts code to AST; files are parsed once and cached — never read twice per run
 - **Engines**: Pattern detectors with multi-level confidence scoring. Each engine walks the AST and classifies findings by severity and confidence before they surface
+- **Cross-file taint analysis**: Builds a project-wide module graph, computes function summaries with taint transfer semantics, and resolves multi-hop data flows across file boundaries — catches vulnerabilities where user input in one file reaches a sink in another
+- **Data flow analysis**: CFG-driven forward solver using abstract interpretation with worklist algorithm, reverse postorder traversal, path-sensitive branch refinement, field-sensitive heap modeling, and def-use chain computation — augments AST-based detection with precise flow tracking
+- **Interactive dashboard**: Live terminal UI during analysis showing phase progress, file throughput, issue counts (raw during scan, final after filtering), recent findings, and phase timeline
 - **Formatter**: Outputs results as terminal (summary/detailed/compact), JSON, HTML, or SARIF
 - **CLI**: Orchestrates analysis, handles exit codes, and integrates with CI/CD pipelines
 
-Engine highlights:
+### Engine Highlights
+
 - **IDOR / Input Validation**: Multi-framework — detects Express (`req.params`), Koa (`ctx.params`), Hapi (`request.payload`), and NestJS patterns. Recognises global validation middleware (`app.use(validate())`)
 - **Stack trace**: Distinguishes `res.json({ error: err.stack })` (report) from `logger.error({ stack: err.stack })` (skip) — skips development guards (`if (NODE_ENV !== 'production')`) and detects GraphQL `formatError` stack leaks
 - **async-forEach**: Recognises `await Promise.allSettled/any/race(array.map(...))` and chained `.then()` as safe patterns
 - **missing-await**: Scope-aware with cross-file heuristics — detects likely-async imports by naming convention, module origin, and `.then()`/`await` usage elsewhere in the file
 - **Secrets**: Entropy-filtered, path-aware — detects secrets in template literals, ignores migration filenames, file path arguments, and test fixtures
+
+### Cross-File Taint Tracking
+
+AI-generated code often introduces vulnerabilities that span multiple files:
+
+```typescript
+// routes/user.ts
+import { processUser } from '../services/user-service';
+app.post('/user', (req, res) => {
+  processUser(req.body);  // tainted input crosses file boundary
+});
+
+// services/user-service.ts
+export function processUser(data: any) {
+  db.query(`SELECT * FROM users WHERE id = ${data.id}`);  // SQL injection
+}
+```
+
+CodeDrift traces `req.body` from the route handler through the import boundary into `processUser`, detecting the SQL injection sink even though no single file contains the full vulnerability.
 
 Performance: 100+ files per second on typical projects
 Privacy: 100% local analysis, no telemetry, code never leaves your machine
@@ -564,22 +616,29 @@ Register in `src/engines/index.ts` and add tests in `tests/`.
 
 **Does this replace ESLint or TypeScript?**
 
-No. CodeDrift complements them. ESLint catches syntax and style issues. TypeScript catches type errors. CodeDrift catches semantic security vulnerabilities.
+No. CodeDrift complements them. ESLint catches syntax and style issues. TypeScript catches type errors. CodeDrift catches the semantic security vulnerabilities that AI code generators introduce — the ones those tools were never designed to find.
 
 **Does my code get sent anywhere?**
 
-No. Analysis runs entirely locally. Zero telemetry. Your code never leaves your machine.
+No. Analysis runs entirely locally. Zero telemetry. Your code never leaves your machine. Unlike cloud-based SAST tools, CodeDrift is fully offline.
 
 **Can I use this with hand-written code?**
 
-Yes. These bugs occur in all code but are more common in AI-generated code.
+Yes. These bugs occur in all code but are significantly more common in AI-generated code. If your team uses Copilot, Cursor, Claude, or ChatGPT for any part of your codebase, CodeDrift should be in your CI pipeline.
+
+**How is this different from Semgrep or SonarQube?**
+
+CodeDrift is purpose-built for AI-generated code patterns. It includes cross-file taint tracking, hallucinated dependency detection, and async correctness checks that general-purpose SAST tools miss. It runs in seconds with zero configuration — `npx codedrift` and you're done.
 
 **Will this catch all bugs?**
 
-No tool catches everything. CodeDrift focuses on the ten most critical and common patterns.
+No tool catches everything. CodeDrift focuses on the most critical patterns that AI assistants generate — the ones that pass code review because they look correct but fail in production.
 
 ## Roadmap
 
+- ~~Cross-file taint analysis~~ — shipped in v1.2.x
+- ~~CFG-driven data flow analysis~~ — shipped in v1.2.x
+- ~~Interactive CLI dashboard~~ — shipped in v1.2.x
 - VS Code extension for real-time detection
 - Auto-fix suggestions
 - Python and Go support

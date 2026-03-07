@@ -82,6 +82,16 @@ export class MissingAwaitDetector extends BaseEngine {
     'on', 'once', 'addEventListener', 'addListener',
   ]);
 
+  // ── Event handler registration methods (for callback detection) ──
+  private static readonly EVENT_REGISTRATION_METHODS = new Set([
+    'on', 'once', 'addEventListener', 'addListener', 'subscribe',
+  ]);
+
+  // ── ORM/query terminal methods that still produce Promises ──
+  private static readonly ORM_TERMINAL_METHODS = new Set([
+    'exec', 'toPromise', 'subscribe', 'pipe', 'stream', 'cursor', 'lean', 'then',
+  ]);
+
   // ── Framework decorators that make methods fire-and-forget ──
   private static readonly FRAMEWORK_DECORATORS = new Set([
     // NestJS HTTP
@@ -122,6 +132,9 @@ export class MissingAwaitDetector extends BaseEngine {
     // 1. Already awaited
     if (this.isAwaited(node)) return null;
 
+    // 1b. Suppression comment on previous line (// no await, // fire-and-forget, etc.)
+    if (this.hasAwaitSuppressionComment(node, context)) return null;
+
     // 2. void prefix (intentional fire-and-forget)
     if (this.hasVoidOperator(node)) return null;
 
@@ -159,6 +172,9 @@ export class MissingAwaitDetector extends BaseEngine {
 
     // 8. Top-level async context (framework callbacks, IIFEs, etc.)
     if (this.isTopLevelAsyncContext(node)) return null;
+
+    // 8b. Inside event handler callback — async calls in event callbacks are fire-and-forget
+    if (this.isInsideEventHandlerCallback(node)) return null;
 
     // 9. Inside Promise.all/allSettled/race/any
     if (this.isInsidePromiseAll(node)) return null;
@@ -364,6 +380,33 @@ export class MissingAwaitDetector extends BaseEngine {
     return !!(node.parent && ts.isVoidExpression(node.parent));
   }
 
+  /**
+   * Check if the line above the call has a suppression comment indicating intentional
+   * no-await, e.g. "// No await to proceed asynchronously", "// fire-and-forget"
+   */
+  private hasAwaitSuppressionComment(node: ts.CallExpression, context: AnalysisContext): boolean {
+    const sf = context.sourceFile;
+    // Find the statement containing this call
+    let stmt: ts.Node = node;
+    while (stmt.parent && !ts.isBlock(stmt.parent) && !ts.isSourceFile(stmt.parent)) {
+      stmt = stmt.parent;
+    }
+    const stmtStart = stmt.getStart(sf);
+    // Get text from the line before the statement
+    const textBefore = sf.text.slice(Math.max(0, stmtStart - 200), stmtStart);
+    // Look at the last comment before the statement
+    const lastLine = textBefore.trimEnd().split('\n').pop() || '';
+    const commentMatch = lastLine.match(/\/\/(.+)$/) || lastLine.match(/\/\*(.+?)\*\//);
+    if (!commentMatch) return false;
+    const comment = commentMatch[1].toLowerCase();
+    return /\bno\s+await\b/.test(comment) ||
+           /\bfire[- ]?and[- ]?forget\b/.test(comment) ||
+           /\bintentionally\s+not\s+await/.test(comment) ||
+           /\bdeliberately\s+not\s+await/.test(comment) ||
+           /\bproceed\s+async/.test(comment) ||
+           /\bdon'?t\s+await\b/.test(comment);
+  }
+
   private hasPromiseHandler(node: ts.CallExpression): boolean {
     const parent = node.parent;
     if (!parent || !ts.isPropertyAccessExpression(parent)) return false;
@@ -405,8 +448,8 @@ export class MissingAwaitDetector extends BaseEngine {
       const name = parent.name.text;
       // Exception: .then/.catch/.finally are Promise handling, NOT sync chains
       if (name === 'then' || name === 'catch' || name === 'finally') return false;
-      // Exception: .exec() is a Mongoose async query terminal
-      if (name === 'exec') return false;
+      // Exception: ORM/query terminal methods that still produce Promises
+      if (MissingAwaitDetector.ORM_TERMINAL_METHODS.has(name)) return false;
       return true;
     }
 
@@ -449,7 +492,11 @@ export class MissingAwaitDetector extends BaseEngine {
    */
   private isCallbackStyleCall(node: ts.CallExpression): boolean {
     if (node.arguments.length === 0) return false;
-    const lastArg = node.arguments[node.arguments.length - 1];
+    let lastArg: ts.Node = node.arguments[node.arguments.length - 1];
+    // Unwrap `await function(err, doc){}` — misplaced await on callback
+    if (ts.isAwaitExpression(lastArg)) {
+      lastArg = lastArg.expression;
+    }
     if (!ASTHelpers.isFunctionLike(lastArg)) return false;
     const funcLike = lastArg as ts.FunctionLikeDeclaration;
     const params = funcLike.parameters;
@@ -636,6 +683,12 @@ export class MissingAwaitDetector extends BaseEngine {
       if (ts.isNonNullExpression(parent)) { current = parent; continue; }
       if (ts.isConditionalExpression(parent)) { current = parent; continue; }
 
+      // Method chaining: db.query('x').update({...}) — inner call is part of a chain.
+      // The Promise propagates through the chain, so `return db.query('x').update({...})`
+      // correctly forwards the result to the caller.
+      if (ts.isPropertyAccessExpression(parent)) { current = parent; continue; }
+      if (ts.isCallExpression(parent) && parent.expression === current) { current = parent; continue; }
+
       // Logical operators: fn() ?? fallback, a || fn()
       if (ts.isBinaryExpression(parent) && [
         ts.SyntaxKind.QuestionQuestionToken,
@@ -722,6 +775,38 @@ export class MissingAwaitDetector extends BaseEngine {
       return true;
     }
 
+    return false;
+  }
+
+  /**
+   * Check if the call is inside an async callback passed to an event registration method
+   * (.on(), .once(), .addEventListener(), .addListener(), .subscribe()).
+   * Async calls inside event handler callbacks are fire-and-forget by nature since
+   * the event emitter doesn't await the handler.
+   */
+  private isInsideEventHandlerCallback(node: ts.Node): boolean {
+    let current = node.parent;
+    while (current) {
+      // Look for arrow functions or function expressions
+      if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+        // Check if this function is an argument to an event registration call
+        const parent = current.parent;
+        if (parent && ts.isCallExpression(parent) && parent.arguments.some(a => a === current)) {
+          const callee = parent.expression;
+          if (ts.isPropertyAccessExpression(callee)) {
+            if (MissingAwaitDetector.EVENT_REGISTRATION_METHODS.has(callee.name.text)) {
+              return true;
+            }
+          }
+        }
+      }
+      // Stop at function boundaries that are NOT event callbacks (to avoid
+      // skipping across unrelated function scopes)
+      if (ts.isFunctionDeclaration(current) || ts.isMethodDeclaration(current)) {
+        break;
+      }
+      current = current.parent;
+    }
     return false;
   }
 
@@ -1463,6 +1548,31 @@ export class MissingAwaitDetector extends BaseEngine {
 
       const loggerObjects = ['logger', 'analytics', 'tracker', 'telemetry', 'metrics'];
       if (loggerObjects.some(obj => lower === obj || lower.endsWith(obj))) return true;
+
+      // Socket.IO fire-and-forget patterns
+      if ((lower === 'socket' || lower === 'io') && (methodName === 'emit' || methodName === 'broadcast')) return true;
+
+      // Message queues (Bull, Bee-Queue, etc.)
+      if (lower === 'queue' && ['add', 'push', 'enqueue', 'process'].includes(methodName)) return true;
+
+      // Message brokers (RabbitMQ, AMQP)
+      if ((lower === 'producer' || lower === 'channel') &&
+          ['send', 'produce', 'publish', 'sendToQueue', 'assertQueue'].includes(methodName)) return true;
+
+      // Kafka
+      if ((lower === 'kafka' || lower === 'producer') && methodName === 'send') return true;
+
+      // PubSub (Google Cloud, generic)
+      if ((lower === 'pubsub' || lower === 'topic' || lower === 'subscription') &&
+          (methodName === 'publish' || methodName === 'emit')) return true;
+
+      // Metrics / telemetry
+      if (lower === 'metrics' && ['increment', 'gauge', 'histogram'].includes(methodName)) return true;
+      if ((lower === 'telemetry' || lower === 'analytics') &&
+          ['track', 'identify', 'increment', 'gauge', 'histogram'].includes(methodName)) return true;
+
+      // Cache operations (fire-and-forget writes/invalidations)
+      if (lower === 'cache' && ['set', 'del', 'invalidate', 'clear'].includes(methodName)) return true;
     }
 
     return false;

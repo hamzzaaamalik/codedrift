@@ -354,12 +354,27 @@ export function isValidationCallExpression(callExpr: ts.CallExpression): boolean
   }
 
   if (ts.isPropertyAccessExpression(callee)) {
+    // Check if the method name itself is a known validation method (e.g. schema.validate, vine.validate)
+    const methodName = callee.name.text;
+    const validationMethodNames = ['validate', 'parse', 'safeParse', 'check', 'guard', 'compile', 'decode'];
+    if (validationMethodNames.includes(methodName)) return true;
+
     const rootId = getRootCallOfChain(callExpr);
     if (rootId) {
       const rootName = rootId.text;
       const expressValidatorFns = ['body', 'param', 'query', 'check', 'validationResult', 'checkSchema', 'oneOf'];
       if (expressValidatorFns.includes(rootName)) return true;
       if (isValidationIdentifier(rootName)) return true;
+    }
+  }
+
+  // Check if any argument name suggests a schema (e.g. validate(userSchema))
+  if (callExpr.arguments.length > 0) {
+    for (const arg of callExpr.arguments) {
+      if (ts.isIdentifier(arg)) {
+        const argLower = arg.text.toLowerCase();
+        if (argLower.includes('schema') || argLower.includes('validator')) return true;
+      }
     }
   }
 

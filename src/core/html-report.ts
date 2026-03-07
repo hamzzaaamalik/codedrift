@@ -852,7 +852,7 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
                             };
                             return `
                         <div class="top-item">
-                            <div class="top-item-name">${engineNames[engine] || engine}</div>
+                            <div class="top-item-name">${escapeHtml(engineNames[engine] || engine)}</div>
                             <div class="top-item-count">${engineIssues.length}</div>
                         </div>
                         `;
@@ -941,7 +941,7 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
                                     'console-in-production': 'Console in Production',
                                     'empty-catch': 'Empty Catch Blocks',
                                 };
-                                return `<option value="${engine}">${engineNames[engine] || engine}</option>`;
+                                return `<option value="${escapeHtml(engine)}">${escapeHtml(engineNames[engine] || engine)}</option>`;
                             }).join('')}
                         </select>
                     </div>
@@ -1068,8 +1068,19 @@ export function generateHTMLReport(result: AnalysisResult, config: CodeDriftConf
                     const pattern = filterState.filePattern.toLowerCase();
                     const filePath = card.dataset.file.toLowerCase();
                     if (pattern.includes('*')) {
-                        const regex = new RegExp('^' + pattern.replace(/\\*/g, '.*') + '$');
-                        if (!regex.test(filePath)) visible = false;
+                        var parts = pattern.split('*');
+                        var match = true;
+                        var pos = 0;
+                        if (parts[0] && filePath.indexOf(parts[0]) !== 0) match = false;
+                        if (match) {
+                            for (var pi = 0; pi < parts.length; pi++) {
+                                var idx = filePath.indexOf(parts[pi], pos);
+                                if (idx === -1) { match = false; break; }
+                                pos = idx + parts[pi].length;
+                            }
+                        }
+                        if (match && parts[parts.length - 1] && !filePath.endsWith(parts[parts.length - 1])) match = false;
+                        if (!match) visible = false;
                     } else if (!filePath.includes(pattern)) visible = false;
                 }
                 if (filterState.searchQuery && !card.textContent.toLowerCase().includes(filterState.searchQuery.toLowerCase())) visible = false;
@@ -1383,18 +1394,18 @@ function renderIssues(issues: Issue[]): string {
     };
 
     return `
-    <div class="issue-card" data-severity="${issue.severity}" data-confidence="${confidence}" data-engine="${issue.engine}" data-file="${escapeHtml(issue.filePath)}">
+    <div class="issue-card" data-severity="${escapeHtml(issue.severity)}" data-confidence="${escapeHtml(confidence)}" data-engine="${escapeHtml(issue.engine)}" data-file="${escapeHtml(issue.filePath)}">
         <div class="issue-card-header" onclick="toggleIssueCard(this)">
             <div class="issue-card-left">
                 <div class="issue-card-title">
                     ${escapeHtml(issue.message)}
                 </div>
                 <div class="issue-card-meta">
-                    <span class="issue-badge badge-${issue.severity}">${issue.severity.toUpperCase()}</span>
-                    <span class="badge-confidence badge-${confidence}">${confidence.toUpperCase()}</span>
+                    <span class="issue-badge badge-${escapeHtml(issue.severity)}">${escapeHtml(issue.severity.toUpperCase())}</span>
+                    <span class="badge-confidence badge-${escapeHtml(confidence)}">${escapeHtml(confidence.toUpperCase())}</span>
                     ${issue.riskScore !== undefined ? `<span class="risk-badge risk-${issue.priority || 'low'}">Risk: ${issue.riskScore}/100</span>` : ''}
                     <span class="issue-file">${escapeHtml(issue.filePath)}</span><span class="issue-line">:${issue.location.line}</span>
-                    <span class="rule-tag">${issue.engine}</span>
+                    <span class="rule-tag">${escapeHtml(issue.engine)}</span>
                 </div>
             </div>
             <div class="issue-card-expand">▼</div>
@@ -1402,9 +1413,9 @@ function renderIssues(issues: Issue[]): string {
         <div class="issue-card-body">
             <div><strong>File:</strong> ${escapeHtml(issue.filePath)}</div>
             <div><strong>Line:</strong> ${issue.location.line}</div>
-            <div><strong>Engine:</strong> ${engineNames[issue.engine] || issue.engine}</div>
-            <div><strong>Severity:</strong> ${issue.severity.toUpperCase()}</div>
-            <div><strong>Confidence:</strong> ${confidence.toUpperCase()}</div>
+            <div><strong>Engine:</strong> ${escapeHtml(engineNames[issue.engine] || issue.engine)}</div>
+            <div><strong>Severity:</strong> ${escapeHtml(issue.severity.toUpperCase())}</div>
+            <div><strong>Confidence:</strong> ${escapeHtml(confidence.toUpperCase())}</div>
             ${issue.riskScore !== undefined ? `<div><strong>Risk Score:</strong> ${issue.riskScore}/100 (${issue.priority?.toUpperCase() || 'LOW'} priority)</div>` : ''}
             ${issue.suggestion ? `
             <div class="suggestion-box">
@@ -1419,110 +1430,6 @@ function renderIssues(issues: Issue[]): string {
     </div>
   `;
   }).join('');
-}
-
-// Removed: render functions for views (caused 5x multiplier bug)
-// @ts-expect-error - Unused function, kept for potential future use
-function _renderIssuesByFile(issuesByFile: Map<string, Issue[]>): string {
-  const entries = Array.from(issuesByFile.entries()).sort((a, b) => b[1].length - a[1].length);
-
-  return entries.map(([file, issues]) => `
-    <div class="file-group">
-        <div class="file-group-header">
-            <span>${escapeHtml(file)}</span>
-            <span class="file-count">${issues.length} issue${issues.length === 1 ? '' : 's'}</span>
-        </div>
-        ${renderIssues(issues)}
-    </div>
-  `).join('');
-}
-
-// @ts-expect-error - Unused function, kept for potential future use
-function _renderIssuesByEngine(issuesByEngine: Map<string, Issue[]>): string {
-  // Prioritize by danger level, not just count
-  const priority: Record<string, number> = {
-    'idor': 1,
-    'missing-input-validation': 2,
-    'hardcoded-secret': 3,
-    'stack-trace-exposure': 4,
-    'missing-await': 5,
-    'async-foreach': 6,
-    'hallucinated-deps': 7,
-    'unsafe-regex': 8,
-    'console-in-production': 9,
-    'empty-catch': 10,
-  };
-
-  const entries = Array.from(issuesByEngine.entries()).sort((a, b) => {
-    const aPriority = priority[a[0]] || 99;
-    const bPriority = priority[b[0]] || 99;
-    if (aPriority !== bPriority) return aPriority - bPriority;
-    return b[1].length - a[1].length; // If same priority, sort by count
-  });
-
-  const engineNames: Record<string, string> = {
-    'idor': 'Insecure Direct Object Reference',
-    'missing-input-validation': 'Missing Input Validation',
-    'hardcoded-secret': 'Hardcoded Secrets',
-    'stack-trace-exposure': 'Stack Trace Exposure',
-    'missing-await': 'Missing Await',
-    'async-foreach': 'Async forEach/map',
-    'hallucinated-deps': 'Hallucinated Dependencies',
-    'unsafe-regex': 'Unsafe Regular Expressions (ReDoS)',
-    'console-in-production': 'Console in Production',
-    'empty-catch': 'Empty Catch Blocks',
-  };
-
-  return entries.map(([engine, issues]) => `
-    <div class="file-group">
-        <div class="file-group-header">
-            <span>${engineNames[engine] || engine}</span>
-            <span class="file-count">${issues.length} issue${issues.length === 1 ? '' : 's'}</span>
-        </div>
-        ${renderIssues(issues)}
-    </div>
-  `).join('');
-}
-
-// @ts-expect-error - Unused function, kept for potential future use
-function _groupIssuesByFile(issues: Issue[]): Map<string, Issue[]> {
-  const map = new Map<string, Issue[]>();
-
-  for (const issue of issues) {
-    const existing = map.get(issue.filePath) || [];
-    existing.push(issue);
-    map.set(issue.filePath, existing);
-  }
-
-  return map;
-}
-
-// @ts-expect-error - Unused function, kept for potential future use
-function _groupIssuesByEngine(issues: Issue[]): Map<string, Issue[]> {
-  const map = new Map<string, Issue[]>();
-
-  for (const issue of issues) {
-    const existing = map.get(issue.engine) || [];
-    existing.push(issue);
-    map.set(issue.engine, existing);
-  }
-
-  return map;
-}
-
-// Function kept for potential future use
-// @ts-expect-error - Unused function kept for future use
-function _groupIssuesByConfidence(_issues: Issue[]): Map<string, Issue[]> {
-  const map = new Map<string, Issue[]>();
-
-  for (const issue of _issues) {
-    const confidence = issue.confidence || 'high';
-    const existing = map.get(confidence) || [];
-    existing.push(issue);
-    map.set(confidence, existing);
-  }
-
-  return map;
 }
 
 /**

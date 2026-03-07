@@ -150,22 +150,12 @@ function isAcceptableEmptyCatch(issue: Issue): boolean {
  */
 export function shouldBoostConfidence(issue: Issue): boolean {
   // Hardcoded secrets with high entropy = definitely real
-  if (issue.engine === 'secret-detector' && issue.metadata?.entropy && issue.metadata.entropy > 4.5) {
-    return true;
-  }
-
-  // SQL injection in production code
-  if (issue.engine === 'sql-injection-detector' && !issue.metadata?.isTestFile) {
-    return true;
-  }
-
-  // XSS in production code
-  if (issue.engine === 'xss-detector' && !issue.metadata?.isTestFile) {
+  if (issue.engine === 'hardcoded-secret' && issue.metadata?.entropy && issue.metadata.entropy > 4.5) {
     return true;
   }
 
   // Stack trace exposure in API handlers
-  if (issue.engine === 'stack-trace-detector') {
+  if (issue.engine === 'stack-trace-exposure') {
     const filePath = issue.filePath.toLowerCase();
     if (filePath.includes('/api/') || filePath.includes('/route') || filePath.includes('/handler')) {
       return true;

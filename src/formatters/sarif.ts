@@ -6,6 +6,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import { fileURLToPath } from 'url';
 import type { AnalysisResult, CodeDriftConfig, Issue } from '../types/index.js';
 import { getEngineName } from './types.js';
 
@@ -94,7 +95,7 @@ export function formatSARIF(result: AnalysisResult, _config: CodeDriftConfig): s
   // Read version from package.json (same pattern as cli.ts)
   let version = '0.0.0';
   try {
-    const pkgPath = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '../../package.json');
+    const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../package.json');
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
     version = pkg.version || version;
   } catch {

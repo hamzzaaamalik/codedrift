@@ -7,6 +7,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { PackageResolver as IPackageResolver, PackageResolution } from '../types/index.js';
 
+/** Normalize a path for case-insensitive prefix comparison on Windows */
+function normalizePath(p: string): string {
+  return process.platform === 'win32' ? p.toLowerCase().replace(/\\/g, '/') : p;
+}
+
 /**
  * Package.json structure
  */
@@ -176,7 +181,7 @@ export class PackageResolver implements IPackageResolver {
     const rootDir = path.dirname(this.packageJsonPath);
     let searchDir = path.dirname(filePath);
 
-    while (searchDir.startsWith(rootDir) || searchDir === rootDir) {
+    while (normalizePath(searchDir).startsWith(normalizePath(rootDir))) {
       const pkgPath = path.join(searchDir, 'package.json');
 
       if (fs.existsSync(pkgPath)) {
@@ -287,7 +292,7 @@ export class PackageResolver implements IPackageResolver {
     let result: string | undefined;
     for (const workspace of this.workspaces) {
       const workspacePath = path.resolve(workspace.path);
-      if (normalizedPath.startsWith(workspacePath)) {
+      if (normalizePath(normalizedPath).startsWith(normalizePath(workspacePath))) {
         result = workspace.name;
         break;
       }
@@ -376,31 +381,46 @@ export class PackageResolver implements IPackageResolver {
    * @returns Array of resolved workspace paths
    */
   private resolveWorkspacePattern(rootDir: string, pattern: string): string[] {
-    const resolved: string[] = [];
+    // Handle multi-level wildcards like 'packages/*/*' or 'examples/*/src/plugins/*'
+    // by splitting on '/*' segments and expanding each level
+    const wildcardIndex = pattern.indexOf('/*');
 
-    // Simple wildcard support for common patterns like 'packages/*'
-    if (pattern.endsWith('/*')) {
-      const baseDir = path.join(rootDir, pattern.slice(0, -2));
-
-      if (fs.existsSync(baseDir)) {
-        try {
-          const entries = fs.readdirSync(baseDir, { withFileTypes: true });
-
-          for (const entry of entries) {
-            if (entry.isDirectory()) {
-              resolved.push(path.join(baseDir, entry.name));
-            }
-          }
-        } catch (error) {
-          // Skip directories that can't be read
-        }
-      }
-    } else {
+    if (wildcardIndex === -1) {
       // Direct path (no wildcard)
       const directPath = path.join(rootDir, pattern);
       if (fs.existsSync(directPath)) {
-        resolved.push(directPath);
+        return [directPath];
       }
+      return [];
+    }
+
+    // Split into prefix before first /* and remainder after it
+    const prefix = pattern.substring(0, wildcardIndex);
+    const remainder = pattern.substring(wildcardIndex + 2); // skip '/*'
+    const baseDir = path.join(rootDir, prefix);
+    const resolved: string[] = [];
+
+    if (!fs.existsSync(baseDir)) {
+      return resolved;
+    }
+
+    try {
+      const entries = fs.readdirSync(baseDir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const entryPath = path.join(baseDir, entry.name);
+          if (remainder) {
+            // More wildcards to expand: recurse with remainder
+            resolved.push(...this.resolveWorkspacePattern(entryPath, remainder));
+          } else {
+            // Terminal wildcard: this directory is a workspace
+            resolved.push(entryPath);
+          }
+        }
+      }
+    } catch (error) {
+      // Skip directories that can't be read
     }
 
     return resolved;
@@ -508,7 +528,7 @@ export class PackageResolver implements IPackageResolver {
     const rootDir = path.dirname(this.packageJsonPath);
     let searchDir = path.dirname(filePath);
 
-    while (searchDir.startsWith(rootDir) || searchDir === rootDir) {
+    while (normalizePath(searchDir).startsWith(normalizePath(rootDir))) {
       const modulePath = path.join(searchDir, 'node_modules', name);
       // Check for directory or package.json inside (handles scoped packages)
       if (fs.existsSync(path.join(modulePath, 'package.json')) || fs.existsSync(modulePath)) {
@@ -556,31 +576,5 @@ export class PackageResolver implements IPackageResolver {
   }
 }
 
-/**
- * Extract package name from a module specifier
- * Handles scoped packages and subpath imports
- *
- * Examples:
- *   'express' -> 'express'
- *   '@types/node' -> '@types/node'
- *   'lodash/debounce' -> 'lodash'
- *   '@org/package/subpath' -> '@org/package'
- *
- * @param moduleName - Module specifier
- * @returns Package name
- */
-export function extractPackageName(moduleName: string): string {
-  // Handle scoped packages (@org/package)
-  if (moduleName.startsWith('@')) {
-    const parts = moduleName.split('/');
-    return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : moduleName;
-  }
-
-  // Handle subpath imports (package/subpath)
-  const firstSlash = moduleName.indexOf('/');
-  if (firstSlash > 0) {
-    return moduleName.substring(0, firstSlash);
-  }
-
-  return moduleName;
-}
+// Re-export extractPackageName from canonical location (file-utils.ts)
+export { extractPackageName } from './file-utils.js';

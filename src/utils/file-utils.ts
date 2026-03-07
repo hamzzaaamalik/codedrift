@@ -347,6 +347,10 @@ export function isPathAlias(moduleName: string): boolean {
   if (moduleName.startsWith('#')) return true;    // Node.js subpath imports and #/ aliases
   if (moduleName.startsWith('virtual:')) return true; // Vite virtual modules
   if (moduleName.includes('?')) return true;      // Query string imports (style.css?inline)
+  // URL imports (ESM dynamic imports from CDN, e.g. https://cdn.jsdelivr.net/...)
+  if (/^https?:\/\//.test(moduleName)) return true;
+  // TypeScript baseUrl-relative imports (e.g. 'src/services/...' resolved via tsconfig baseUrl)
+  if (moduleName.startsWith('src/') || moduleName.startsWith('lib/') || moduleName.startsWith('app/')) return true;
   return false;
 }
 
