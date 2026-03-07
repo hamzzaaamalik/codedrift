@@ -194,6 +194,15 @@ export class AsyncForEachDetector extends BaseEngine {
       return null;
     }
 
+    // Step 5b: For reduce/reduceRight — skip if the callback awaits the accumulator
+    // AND the initial value is a Promise (Promise.resolve(...)).
+    // Pattern: .reduce(async (accPromise, item) => { const acc = await accPromise; ... }, Promise.resolve(init))
+    if ((methodName === 'reduce' || methodName === 'reduceRight') &&
+        this.isCorrectAsyncReduce(resolvedCallback.callbackNode) &&
+        this.hasPromiseInitialValue(node)) {
+      return null;
+    }
+
     // Step 6: Map result tracking
     let mapResultStatus: 'handled' | 'discarded' | 'unhandled' | null = null;
     if (PROMISE_ARRAY_METHODS.has(methodName)) {
@@ -564,6 +573,25 @@ export class AsyncForEachDetector extends BaseEngine {
       if (ts.isReturnStatement(node) && node.expression &&
           ts.isIdentifier(node.expression) && node.expression.text === varName) {
         handled = true;
+        return;
+      }
+
+      // return Promise.all(varName) or return Promise.allSettled(varName)
+      if (ts.isReturnStatement(node) && node.expression && ts.isCallExpression(node.expression)) {
+        const call = node.expression;
+        if (ts.isPropertyAccessExpression(call.expression)) {
+          const obj = call.expression.expression;
+          const method = call.expression.name.text;
+          if (ts.isIdentifier(obj) && obj.text === 'Promise' &&
+              ['all', 'allSettled', 'any', 'race'].includes(method)) {
+            for (const arg of call.arguments) {
+              if (ts.isIdentifier(arg) && arg.text === varName) {
+                handled = true;
+                return;
+              }
+            }
+          }
+        }
       }
     });
 
@@ -671,6 +699,11 @@ export class AsyncForEachDetector extends BaseEngine {
             if (promiseCallParent && (ts.isVariableDeclaration(promiseCallParent) || ts.isReturnStatement(promiseCallParent))) {
               return true;
             }
+
+            // Concise arrow body: const fn = () => Promise.all(...)
+            if (promiseCallParent && ts.isArrowFunction(promiseCallParent) && promiseCallParent.body === current) {
+              return true;
+            }
           }
         }
       }
@@ -678,6 +711,57 @@ export class AsyncForEachDetector extends BaseEngine {
       current = current.parent;
     }
 
+    return false;
+  }
+
+  // ──────────────────── Async Reduce Detection ────────────────────
+
+  /**
+   * Detect the correct async reduce pattern where the callback awaits its accumulator.
+   * Pattern: .reduce(async (acc, item) => { const result = await acc; ... }, Promise.resolve(init))
+   * The key signal: the first parameter of the callback is awaited inside the body.
+   */
+  private isCorrectAsyncReduce(callbackNode: ts.Node): boolean {
+    if (!ASTHelpers.isFunctionLike(callbackNode)) return false;
+    const func = callbackNode as ts.FunctionLikeDeclaration;
+    if (func.parameters.length < 2) return false;
+
+    const firstParam = func.parameters[0];
+    if (!ts.isIdentifier(firstParam.name)) return false;
+    const accName = firstParam.name.text;
+
+    // Check if the accumulator parameter is awaited in the body
+    let awaitsAcc = false;
+    const walk = (node: ts.Node) => {
+      if (awaitsAcc) return;
+      // Don't descend into nested functions
+      if (ASTHelpers.isFunctionLike(node) && node !== callbackNode) return;
+      if (ts.isAwaitExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === accName) {
+        awaitsAcc = true;
+        return;
+      }
+      ts.forEachChild(node, walk);
+    };
+    ts.forEachChild(callbackNode, walk);
+
+    return awaitsAcc;
+  }
+
+  /**
+   * Check if a reduce call has a Promise initial value (Promise.resolve(...)).
+   */
+  private hasPromiseInitialValue(node: ts.CallExpression): boolean {
+    // reduce(callback, initialValue) — initialValue is the 2nd argument
+    if (node.arguments.length < 2) return false;
+    const initArg = node.arguments[1];
+    // Promise.resolve(...) or new Promise(...)
+    if (ts.isCallExpression(initArg) && ts.isPropertyAccessExpression(initArg.expression)) {
+      const obj = initArg.expression.expression;
+      const method = initArg.expression.name.text;
+      if (ts.isIdentifier(obj) && obj.text === 'Promise' && method === 'resolve') {
+        return true;
+      }
+    }
     return false;
   }
 

@@ -73,6 +73,18 @@ export class IDORDetector extends BaseEngine {
     /workspace_id/,
     /projectId/,
     /project_id/,
+    // Policy / RBAC / capability-based authorization
+    /isAuthorized/,
+    /checkPermission/,
+    /policy\.check/,
+    /policy\.evaluate/,
+    /policy\.enforce/,
+    /acl\.check/,
+    /acl\.verify/,
+    /rbac\.check/,
+    /permissions\.check/,
+    /ability\.can/,
+    /accessibleBy/,
   ];
 
   /** Ownership column names in WHERE clauses — if key matches, query is ownership-scoped */
@@ -165,6 +177,16 @@ export class IDORDetector extends BaseEngine {
     /req(uest)?\.claims\.\w+/,
     // GraphQL context
     /context\.user\.\w+/,
+    // API key / token / service account identity
+    /req(uest)?\.apiKey/,
+    /req(uest)?\.token/,
+    /req(uest)?\.serviceAccount/,
+    /ctx\.apiKey/,
+    /ctx\.token/,
+    /ctx\.serviceAccount/,
+    /\bapiKeyId\b/,
+    /\btokenId\b/,
+    /\bserviceAccountId\b/,
   ];
 
   /** Admin/role middleware — skip IDOR entirely for these routes */
@@ -332,8 +354,25 @@ export class IDORDetector extends BaseEngine {
       return null;
     }
 
+    // Skip authentication endpoints (login, register, forgot-password, etc.)
+    // These inherently query by user-supplied credentials — that's their purpose
+    if (this.isAuthenticationRoute(node)) {
+      return null;
+    }
+
+    // Skip shared reference-data queries (lookup tables like Country, DegreeLevel, Industry)
+    // These have no per-user ownership concept — the concern is missing role auth, not IDOR
+    if (this.isReferenceDataQuery(node, methodName)) {
+      return null;
+    }
+
     // Check if the WHERE clause itself contains ownership columns (AST-level)
     if (this.hasWhereClauseOwnership(node)) {
+      return null;
+    }
+
+    // Check if the database object name implies tenant/scoped ownership (e.g., tenantDb, scopedRepo)
+    if (objectName && /^(tenant|scoped|org|user)(Db|Database|Repo|Repository|Connection|Pool|Client|Query)/i.test(objectName)) {
       return null;
     }
 
@@ -366,6 +405,28 @@ export class IDORDetector extends BaseEngine {
     } else if (methodName === 'where' || methodName === 'query' || methodName === 'select') {
       // Lower confidence for generic query methods (may have WHERE user_id)
       confidence = 'low';
+    }
+
+    // Taint analysis: refine confidence if taint tracking is available
+    const functionScope = this.findEnclosingFunction(node);
+    if (functionScope) {
+      for (const arg of node.arguments) {
+        if (!ts.isIdentifier(arg)) continue;
+        const taintResult = this.checkTaint(context, arg, functionScope);
+        if (taintResult === null) continue; // taint unavailable, fall through to heuristic
+        if (taintResult.tainted && taintResult.sanitized) {
+          // Sanitized user input — not an IDOR risk
+          return null;
+        }
+        if (taintResult.tainted && !taintResult.sanitized) {
+          // Confirmed user-controlled and unsanitized — high confidence
+          confidence = 'high';
+        }
+        if (!taintResult.tainted) {
+          // Not user-controlled — lower confidence to heuristic-only
+          confidence = 'low';
+        }
+      }
     }
 
     // Determine appropriate suggestion based on operation type
@@ -702,6 +763,8 @@ export class IDORDetector extends BaseEngine {
       // Policy-based (CASL, etc.)
       /^(can|cannot|ability\.can|ability\.cannot)$/i,
       /^(checkPolicy|enforcePolicy|evaluatePolicy)$/i,
+      // CASL accessibleBy
+      /^accessibleBy$/i,
     ];
 
     return authFunctionPatterns.some(p => p.test(callName!));
@@ -906,6 +969,124 @@ export class IDORDetector extends BaseEngine {
   }
 
   /**
+   * Detect authentication routes (login, register, forgot-password, etc.)
+   * These inherently query by user-supplied credentials — not IDOR.
+   */
+  private isAuthenticationRoute(queryNode: ts.Node): boolean {
+    const authKeywords = [
+      'login', 'signin', 'signIn', 'sign_in',
+      'register', 'signup', 'signUp', 'sign_up',
+      'forgot', 'forgotPassword', 'forgotpassword', 'forgot_password',
+      'resetPassword', 'resetpassword', 'reset_password',
+      'verifyEmail', 'verifyemail', 'verify_email',
+      'confirm', 'activate', 'authenticate',
+      'refreshToken', 'refresh_token',
+    ];
+
+    // Strategy 1: Check route path from router.post('/login', ...)
+    const routeCall = this.findEnclosingRouteCall(queryNode);
+    if (routeCall && routeCall.arguments.length > 0) {
+      const firstArg = routeCall.arguments[0];
+      if (ts.isStringLiteral(firstArg) || ts.isNoSubstitutionTemplateLiteral(firstArg)) {
+        const routePath = firstArg.text.toLowerCase();
+        const pathPatterns = authKeywords.map(k => '/' + k.toLowerCase());
+        if (pathPatterns.some(p => routePath.includes(p))) {
+          return true;
+        }
+      }
+    }
+
+    // Strategy 2: Check enclosing function name (for controller-style: const login = function(req, res){})
+    let current: ts.Node | undefined = queryNode.parent;
+    while (current && !ts.isSourceFile(current)) {
+      let funcName: string | null = null;
+
+      // Named function declaration: function login(req, res) {}
+      if (ts.isFunctionDeclaration(current) && current.name) {
+        funcName = current.name.text;
+      }
+      // Variable assignment: const login = function(req, res) {} or const login = (req, res) => {}
+      if ((ts.isFunctionExpression(current) || ts.isArrowFunction(current)) && current.parent) {
+        const parent = current.parent;
+        if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
+          funcName = parent.name.text;
+        }
+        // Property assignment: module.exports.login = function() {}
+        if (ts.isPropertyAssignment(parent) && ts.isIdentifier(parent.name)) {
+          funcName = parent.name.text;
+        }
+      }
+
+      if (funcName) {
+        const lower = funcName.toLowerCase();
+        // Match exact or compound names: login, signupAdmin, facebookLogin, etc.
+        if (authKeywords.some(k => lower === k.toLowerCase() || lower.startsWith(k.toLowerCase()) || lower.endsWith(k.toLowerCase()))) {
+          return true;
+        }
+      }
+      current = current.parent;
+    }
+
+    return false;
+  }
+
+  /**
+   * Detect queries on shared reference/lookup data (countries, industries, degree levels, etc.)
+   * These have no per-user ownership — IDOR doesn't apply.
+   *
+   * Heuristic: if the query filter uses `name` (not `_id`/`id`) as the key, AND
+   * the method is a read-or-create pattern (findOne + nearby create/save), it's a
+   * reference data duplicate check. Also skip when the object name itself is a
+   * well-known reference-data model.
+   */
+  private isReferenceDataQuery(queryNode: ts.CallExpression, methodName: string): boolean {
+    // Only applies to findOne/findOneBy — the common duplicate-check method
+    if (methodName !== 'findOne' && methodName !== 'findOneBy') return false;
+
+    // Check if the query filter key is 'name', 'email', 'cnic', 'code', 'slug', 'title'
+    // (non-ID fields used for duplicate checking, not for accessing a specific user resource)
+    const filterArg = queryNode.arguments[0];
+    if (!filterArg || !ts.isObjectLiteralExpression(filterArg)) return false;
+
+    const filterKeys = filterArg.properties
+      .filter((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p))
+      .map(p => ts.isIdentifier(p.name) ? p.name.text : p.name.getText());
+
+    // If the only filter key is a non-ID field, check for creation context
+    const nonIdFields = new Set(['name', 'title', 'code', 'slug', 'label', 'key', 'type']);
+    const hasOnlyNonIdFields = filterKeys.length > 0 && filterKeys.every(k => nonIdFields.has(k));
+
+    if (hasOnlyNonIdFields) {
+      // Check if there's a creation call nearby (new Model(), Model.create(), .save())
+      // indicating this is a duplicate check before insert
+      const functionScope = this.findEnclosingFunction(queryNode);
+      if (functionScope) {
+        const bodyText = functionScope.getText();
+        if (/\bnew\s+[A-Z]\w*\s*\(/.test(bodyText) || /\.create\s*\(/.test(bodyText) || /\.save\s*\(/.test(bodyText)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Find the enclosing function (arrow, function expression, or method).
+   */
+  private findEnclosingFunction(node: ts.Node): ts.Node | null {
+    let current = node.parent;
+    while (current && !ts.isSourceFile(current)) {
+      if (ts.isFunctionDeclaration(current) || ts.isFunctionExpression(current) ||
+          ts.isArrowFunction(current) || ts.isMethodDeclaration(current)) {
+        return current;
+      }
+      current = current.parent;
+    }
+    return null;
+  }
+
+  /**
    * AST-level check for ownership columns in the WHERE clause of the query call.
    * Handles: object literal WHERE, Prisma nested, spread scope, chained .where(), .scope()
    */
@@ -993,7 +1174,8 @@ export class IDORDetector extends BaseEngine {
         }
       }
 
-      break;
+      // Continue walking up through non-chain nodes (e.g., parenthesized expressions)
+      current = current.parent;
     }
 
     // Text-based fallback: check full call text for ownership columns

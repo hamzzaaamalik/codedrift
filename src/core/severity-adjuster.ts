@@ -47,7 +47,7 @@ export function adjustSeverity(issue: Issue): Issue | null {
   }
 
   // Console statements: context-aware severity
-  if (issue.engine === 'console-detector' || issue.engine === 'console-in-production') {
+  if (issue.engine === 'console-in-production') {
     const filePath = issue.filePath.toLowerCase();
 
     // Console in dev/debug/scripts is just info

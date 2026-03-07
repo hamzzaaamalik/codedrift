@@ -67,6 +67,41 @@ export class MissingInputValidationDetector extends BaseEngine {
     'putitem', 'updateitem', 'set', 'add', 'push',
   ]);
 
+  /** Known typed ORM object names — these enforce schema at the database level */
+  private static readonly TYPED_ORM_OBJECTS = new Set([
+    'prisma', 'db', 'drizzle',
+  ]);
+
+  /** ORM methods that enforce typed schema validation */
+  private static readonly TYPED_ORM_METHODS = new Set([
+    'create', 'insert', 'upsert', 'update', 'createMany', 'updateMany',
+  ]);
+
+  /**
+   * Detect typed ORM patterns like `prisma.user.create({ data: req.body })`
+   * or `db.insert(users).values(req.body)`.
+   * Returns true if the handler passes request data to a typed ORM method.
+   */
+  private static hasTypedOrmUsage(handlerText: string): boolean {
+    const lowerText = handlerText.toLowerCase();
+
+    // Prisma: prisma.<model>.create/upsert/update({ data: ... })
+    for (const ormObj of MissingInputValidationDetector.TYPED_ORM_OBJECTS) {
+      for (const method of MissingInputValidationDetector.TYPED_ORM_METHODS) {
+        if (lowerText.includes(`${ormObj}.`) && lowerText.includes(`.${method}(`)) {
+          return true;
+        }
+      }
+    }
+
+    // Drizzle: db.insert(table).values(...)
+    if (/\bdb\.insert\(\w+\)\.values\(/.test(handlerText)) {
+      return true;
+    }
+
+    return false;
+  }
+
   /** Database read operations */
   private static readonly DB_READ_OPS = new Set([
     'find', 'findone', 'findbyid', 'findbypk', 'findunique', 'findfirst',
@@ -322,6 +357,11 @@ export class MissingInputValidationDetector extends BaseEngine {
       }
     }
 
+    // Taint analysis: check if unsanitized flows exist in this handler
+    const taintResult = this.analyzeTaintFlows(context, handler.node);
+    const hasTaintUnsanitized = taintResult != null && taintResult.unsanitizedFlows.length > 0;
+    const hasTaintAllSanitized = taintResult != null && taintResult.flows.length > 0 && taintResult.unsanitizedFlows.length === 0;
+
     // Flag once per source type
     for (const usage of uniqueUsages) {
       const normalizedSource = usage.source.replace(/ \(destructured\)| \(spread\)| \(alias\)| \(dynamic\)| \(Object\.assign\)| \(function arg\)/, '');
@@ -366,7 +406,28 @@ export class MissingInputValidationDetector extends BaseEngine {
       }
 
       const usageContext = this.classifyUsageContext(usage, handler.node);
-      const { severity, confidence } = this.determineSeverity(usage, usageContext, hasWeakValidation);
+      let { severity, confidence } = this.determineSeverity(usage, usageContext, hasWeakValidation);
+
+      // Downgrade severity if request data flows into a typed ORM method
+      // (Prisma, Drizzle enforce schema at DB level — still worth noting, but not critical)
+      const handlerText = handler.node.getText();
+      if (MissingInputValidationDetector.hasTypedOrmUsage(handlerText) &&
+          usage.usageKind !== 'spread' && usage.usageKind !== 'object-assign' && usage.usageKind !== 'dynamic') {
+        severity = 'info';
+        confidence = 'low';
+      }
+
+      // Taint-based confidence adjustment
+      if (hasTaintUnsanitized) {
+        // Confirmed unsanitized flow — boost confidence
+        if (confidence === 'medium' || confidence === 'low') {
+          confidence = 'high';
+        }
+      } else if (hasTaintAllSanitized) {
+        // All flows sanitized — downgrade
+        severity = 'info';
+        confidence = 'low';
+      }
 
       const suggestion = this.generateSuggestion(usage, usageContext, fields, normalizedSource);
 

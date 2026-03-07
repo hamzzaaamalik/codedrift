@@ -143,7 +143,7 @@ export function deduplicateByMessage(issues: Issue[]): IssueGroup[] {
  * @returns Top N issue groups sorted by frequency
  */
 export function getTopIssues(issueGroups: IssueGroup[], topN: number = 10): IssueGroup[] {
-  return issueGroups
+  return [...issueGroups]
     .sort((a, b) => b.count - a.count)
     .slice(0, topN);
 }

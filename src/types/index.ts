@@ -56,6 +56,29 @@ export interface AnalysisContext {
    * Used to prevent hallucinated-deps from flagging internal path aliases.
    */
   pathAliases?: Set<string>;
+  /** Taint analyzer for data flow tracking (lazy — no cost until used) */
+  taintAnalyzer?: {
+    analyzeScope(scopeNode: any): any;
+    isExpressionTainted(expr: any, scopeNode: any): any;
+  };
+  /** Cross-file taint analysis (shared across all files in a scan) */
+  crossFileTaint?: {
+    queryEngine: {
+      findAllFlows(options?: any): any[];
+      queryFromSink(canonicalId: string, sinkHitIndex: number, options?: any): any[];
+      queryFromSource(canonicalId: string, options?: any): any[];
+    };
+    summaryStore: {
+      get(canonicalId: string): any;
+      getForFile(filePath: string): any[];
+    };
+    projectGraph: {
+      resolveCall(call: any, fromFile: string): any[];
+      getCallers(canonicalId: string): any[];
+      traceImport(localName: string, fromFile: string): any;
+      projectRoot: string;
+    };
+  };
 }
 
 /**

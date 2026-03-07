@@ -28,6 +28,10 @@ export function detectValidationImports(sourceFile: ts.SourceFile): Set<string> 
       if (mod.includes('joi') || mod.includes('celebrate')) imports.add('joi');
       if (mod.includes('yup')) imports.add('yup');
       if (mod.includes('ajv')) imports.add('ajv');
+      if (mod.includes('runtypes')) imports.add('runtypes');
+      if (mod.includes('arktype')) imports.add('arktype');
+      if (mod.includes('@vinejs/vine') || mod.includes('vine')) imports.add('vine');
+      if (mod.includes('effect/Schema') || mod.includes('@effect/schema')) imports.add('effect-schema');
     }
   });
   return imports;
@@ -96,15 +100,40 @@ export function hasValidationInHandler(
       if (validationImports.has('superstruct')) {
         validationPatterns.push(/\bcreate\(/);
         validationPatterns.push(/\bassert\(/);
+        validationPatterns.push(/\bis\(/);
       }
       if (validationImports.has('io-ts')) {
         validationPatterns.push(/\.decode\(/);
+        validationPatterns.push(/\.is\(/);
         validationPatterns.push(/isLeft\(/);
         validationPatterns.push(/isRight\(/);
       }
       if (validationImports.has('valibot')) {
         validationPatterns.push(/v\.parse\(/);
         validationPatterns.push(/v\.safeParse\(/);
+        validationPatterns.push(/v\.is\(/);
+      }
+      if (validationImports.has('runtypes')) {
+        validationPatterns.push(/\.check\(/);
+        validationPatterns.push(/\.guard\(/);
+      }
+      if (validationImports.has('typebox')) {
+        validationPatterns.push(/Value\.Check\(/);
+        validationPatterns.push(/Value\.Decode\(/);
+      }
+      if (validationImports.has('arktype')) {
+        validationPatterns.push(/\btype\(/);
+        validationPatterns.push(/\bscope\(/);
+      }
+      if (validationImports.has('vine')) {
+        validationPatterns.push(/vine\.validate\(/);
+        validationPatterns.push(/vine\.compile\(/);
+      }
+      if (validationImports.has('effect-schema')) {
+        validationPatterns.push(/Schema\.decode\(/);
+        validationPatterns.push(/Schema\.parse\(/);
+        validationPatterns.push(/Schema\.decodeSync\(/);
+        validationPatterns.push(/Schema\.parseSync\(/);
       }
 
       if (validationPatterns.some(pattern => pattern.test(text))) {

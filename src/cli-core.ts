@@ -2,7 +2,8 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs';
-import { analyzeProject } from './core/analyzer.js';
+import { analyzeProject, type AnalysisProgressEvent } from './core/analyzer.js';
+import { ProgressDashboard } from './cli/progress-dashboard.js';
 import { loadConfig } from './core/config.js';
 import { formatJSON } from './core/formatter.js';
 import { formatOutput, formatSARIF } from './formatters/index.js';
@@ -94,26 +95,33 @@ program
       config.excludeTestFiles = true;
     }
 
-    // Use spinner for terminal output (not in CI, not to file)
-    const useSpinner = (outputFormat === 'terminal' || outputFormat === 'summary' || outputFormat === 'detailed')
-                       && !outputFile && !ci;
-    const spinner = useSpinner ? ora('🔍 Discovering files...').start() : null;
+    // Use interactive dashboard for terminal output (not in CI, not to file)
+    const useInteractive = (outputFormat === 'terminal' || outputFormat === 'summary' || outputFormat === 'detailed')
+                           && !outputFile && !ci;
+    const dashboard = new ProgressDashboard(useInteractive);
+    // Fallback spinner for CI or non-interactive
+    const spinner = (!useInteractive && !ci && !outputFile) ? ora('🔍 Analyzing...').start() : null;
 
     try {
-      if (spinner) spinner.text = '📦 Loading workspace...';
+      if (useInteractive) dashboard.start();
 
       const startTime = Date.now();
       const result = await analyzeProject({
         fullScan: options.full,
         generateGraph: options.graph,
         updateBaseline: false, // We handle baseline separately
+        onProgress: (event: AnalysisProgressEvent) => {
+          dashboard.update(event as any);
+        },
       });
       const endTime = Date.now();
 
       result.startTime = startTime;
       result.endTime = endTime;
 
-      if (spinner) {
+      if (useInteractive) {
+        dashboard.stop();
+      } else if (spinner) {
         spinner.succeed('🔬 Analysis complete');
       }
 
@@ -229,6 +237,7 @@ program
 
       // Write to file or stdout
       if (outputFile) {
+        fs.mkdirSync(path.dirname(outputFile), { recursive: true });
         fs.writeFileSync(outputFile, outputContent, 'utf-8');
         if (finalFormat === 'terminal') {
           console.log(chalk.green(`✓ Report written to ${outputFile}`));
@@ -245,6 +254,7 @@ program
         if (!ci && !options.output && finalFormat !== 'json' && finalFormat !== 'sarif' && finalFormat !== 'html') {
           const htmlPath = 'codedrift-report.html';
           const htmlContent = generateHTMLReport(reportResult, config, formatterOptions);
+          fs.mkdirSync(path.dirname(htmlPath), { recursive: true });
           fs.writeFileSync(htmlPath, htmlContent, 'utf-8');
           console.log(chalk.cyan(`\nReport: ${htmlPath} (open in browser)`));
         }
@@ -276,6 +286,7 @@ program
       }
 
     } catch (error) {
+      if (useInteractive) dashboard.stop(error instanceof Error ? error.message : String(error));
       if (spinner) spinner.stop();
       console.error(chalk.red.bold('\n❌ Error:'), error instanceof Error ? error.message : error);
       // Exit code 2: Analysis error

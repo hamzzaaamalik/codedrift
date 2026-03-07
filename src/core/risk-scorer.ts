@@ -43,7 +43,7 @@ export function calculateRiskScore(issue: Issue): number {
   // Context adjustments
   if (issue.metadata?.isTestFile) {
     // Test files are less critical (except for secrets)
-    if (issue.engine !== 'secret-detector' && issue.engine !== 'hardcoded-secret') {
+    if (issue.engine !== 'hardcoded-secret') {
       score *= 0.3;
     }
   }
@@ -55,10 +55,7 @@ export function calculateRiskScore(issue: Issue): number {
 
   // Engine weight (security issues are critical)
   const securityEngines = [
-    'secret-detector',
     'hardcoded-secret',
-    'sql-injection-detector',
-    'xss-detector',
     'idor',
     'missing-input-validation',
     'stack-trace-exposure',

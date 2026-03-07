@@ -36,8 +36,17 @@ export class ConsoleInProductionDetector extends BaseEngine {
     // Check if this file imports an established logging library
     const hasLoggerImport = this.fileUsesLoggerLibrary(context);
 
+    // Check if this file imports the 'debug' npm package
+    const hasDebugImport = this.fileImportsDebugPackage(context);
+
     traverse(context.sourceFile, (node) => {
       if (ts.isCallExpression(node)) {
+        // Skip debug() calls if the file imports the 'debug' package —
+        // 'debug' is a controlled logging solution, not console pollution.
+        if (hasDebugImport && this.isDebugPackageCall(node)) {
+          return;
+        }
+
         const issue = this.checkConsoleCall(node, context);
         if (issue) {
           // If the file uses a proper logger, suppress only LOW-confidence findings.
@@ -133,6 +142,22 @@ export class ConsoleInProductionDetector extends BaseEngine {
     } else if (this.isInRouteHandler(node)) {
       // Console in route handlers is more likely a bug
       confidence = 'high';
+    }
+
+    // Catch block context: console in error handlers is commonly intentional
+    if (this.isInCatchBlock(node)) {
+      confidence = 'low';
+    }
+
+    // Structured logging: JSON.stringify() suggests intentional, controlled output
+    if (this.hasStructuredLoggingArg(node)) {
+      confidence = 'low';
+    }
+
+    // Anonymization: arguments passing through masking/redacting functions
+    // indicate the developer is being careful about what's logged
+    if (this.hasAnonymizationArg(node)) {
+      confidence = 'low';
     }
 
     return this.createIssue(context, node, message, {
@@ -418,6 +443,100 @@ export class ConsoleInProductionDetector extends BaseEngine {
       return true;
     }
 
+    return false;
+  }
+
+  /**
+   * Check if the file imports the 'debug' npm package.
+   * The debug package is a controlled logging solution, not console pollution.
+   */
+  private fileImportsDebugPackage(context: AnalysisContext): boolean {
+    const imports = getImports(context.sourceFile);
+    return imports.some(imp => imp.moduleName === 'debug');
+  }
+
+  /**
+   * Check if a call expression is a debug() call from the debug package.
+   * Matches: debug('namespace')(...), createDebug(...), or a variable bound from debug.
+   * Since we cannot do full binding analysis, we match calls to identifiers named 'debug'
+   * or common patterns like debug('app:server').
+   */
+  private isDebugPackageCall(node: ts.CallExpression): boolean {
+    const { expression } = node;
+    // Direct call: debug(...)
+    if (ts.isIdentifier(expression) && expression.text === 'debug') {
+      return true;
+    }
+    // Curried call: debug('namespace')(...) — the outer call's expression is itself a call to debug
+    if (ts.isCallExpression(expression)) {
+      const inner = expression.expression;
+      if (ts.isIdentifier(inner) && inner.text === 'debug') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Check if the console call is inside a catch block.
+   * Console in error handlers is commonly intentional for debugging production issues.
+   */
+  private isInCatchBlock(node: ts.Node): boolean {
+    let current = node.parent;
+    while (current) {
+      if (ts.isCatchClause(current)) {
+        return true;
+      }
+      current = current.parent;
+    }
+    return false;
+  }
+
+  /**
+   * Check if any argument to the console call is a JSON.stringify() call.
+   * Structured logging suggests intentional, controlled output.
+   */
+  private hasStructuredLoggingArg(node: ts.CallExpression): boolean {
+    if (!node.arguments) return false;
+    for (const arg of node.arguments) {
+      if (
+        ts.isCallExpression(arg) &&
+        ts.isPropertyAccessExpression(arg.expression) &&
+        ts.isIdentifier(arg.expression.expression) &&
+        arg.expression.expression.text === 'JSON' &&
+        arg.expression.name.text === 'stringify'
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Check if any argument passes through a known anonymization/masking function.
+   * These functions indicate the developer is being careful about what's logged.
+   */
+  private hasAnonymizationArg(node: ts.CallExpression): boolean {
+    if (!node.arguments) return false;
+
+    const anonymizationPattern = /hash|mask|redact|anonymize|sanitize|obfuscate|censor|scrub|encrypt/i;
+
+    for (const arg of node.arguments) {
+      if (ts.isCallExpression(arg)) {
+        const callee = arg.expression;
+        let funcName: string | null = null;
+
+        if (ts.isIdentifier(callee)) {
+          funcName = callee.text;
+        } else if (ts.isPropertyAccessExpression(callee)) {
+          funcName = callee.name.text;
+        }
+
+        if (funcName && anonymizationPattern.test(funcName)) {
+          return true;
+        }
+      }
+    }
     return false;
   }
 

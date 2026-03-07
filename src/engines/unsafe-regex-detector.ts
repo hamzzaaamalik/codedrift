@@ -117,9 +117,11 @@ export class UnsafeRegexDetector extends BaseEngine {
    */
   private checkRegexLiteral(node: ts.RegularExpressionLiteral, context: AnalysisContext): Issue | null {
     const regexText = node.text;
-    const match = regexText.match(/^\/(.+)\/([gimsuvy]*)$/);
-    if (!match) return null;
-    const [, pattern] = match;
+    // Find the last '/' to split pattern from flags (avoids greedy backtracking)
+    const lastSlash = regexText.lastIndexOf('/');
+    if (lastSlash <= 0) return null;
+    const pattern = regexText.slice(1, lastSlash);
+    if (!pattern) return null;
     return this.checkPattern(pattern, node, context);
   }
 
