@@ -182,9 +182,9 @@ export class AsyncForEachDetector extends BaseEngine {
       return null;
     }
 
-    // Step 4: Resolve callback — check if it's async
+    // Step 4: Resolve callback — check if it's async (includes cross-file resolution)
     const callback = node.arguments[0];
-    const resolvedCallback = this.resolveCallbackAsync(callback);
+    const resolvedCallback = this.resolveCallbackAsync(callback, context);
     if (!resolvedCallback) {
       return null; // Not an async callback
     }
@@ -265,7 +265,7 @@ export class AsyncForEachDetector extends BaseEngine {
     if (node.arguments.length < 2) return null;
 
     const mapper = node.arguments[1];
-    const resolved = this.resolveCallbackAsync(mapper);
+    const resolved = this.resolveCallbackAsync(mapper, context);
     if (!resolved) return null;
 
     // Skip if within Promise wrapper
@@ -299,6 +299,7 @@ export class AsyncForEachDetector extends BaseEngine {
    */
   private resolveCallbackAsync(
     callbackArg: ts.Node,
+    context?: AnalysisContext,
   ): { callbackNode: ts.Node } | null {
     // Case 1: Inline async function/arrow
     if (ASTHelpers.isFunctionLike(callbackArg) && ASTHelpers.isAsyncFunction(callbackArg)) {
@@ -312,6 +313,31 @@ export class AsyncForEachDetector extends BaseEngine {
       if (decl && this.isAsyncDeclaration(decl)) {
         return { callbackNode: decl };
       }
+
+      // Case 2b: Cross-file resolution — imported function
+      // When the callback is an imported identifier (e.g., `items.forEach(processItem)`)
+      // and processItem is defined as async in another file, resolve it via project graph.
+      if (!decl && context?.crossFileTaint) {
+        // Build a synthetic call expression isn't needed — we can check the import directly
+        const importTarget = context.crossFileTaint.projectGraph.traceImport(
+          name, context.filePath
+        );
+        if (importTarget) {
+          const summary = context.crossFileTaint.summaryStore.get(
+            importTarget.canonicalId || importTarget
+          );
+          if (summary) {
+            const summaryStr = JSON.stringify(summary);
+            if (/"isAsync"\s*:\s*true/.test(summaryStr) ||
+                /"returnsPromise"\s*:\s*true/.test(summaryStr)) {
+              // Cross-file confirmed async — use the callbackArg itself as the node
+              // (we don't have the actual AST node from another file)
+              return { callbackNode: callbackArg };
+            }
+          }
+        }
+      }
+
       return null;
     }
 

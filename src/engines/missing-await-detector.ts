@@ -220,8 +220,36 @@ export class MissingAwaitDetector extends BaseEngine {
 
     // S4: this.method() already handled above (knownAsync)
 
-    // High confidence: any of S1-S4
-    const isHighConfidence = isDeclaredAsync || hasPromiseReturn || isKnownAPI;
+    // S4b: Cross-file function resolution via project graph
+    // When a function is imported from another file, resolve its definition to check
+    // if it's declared async or returns Promise<T>. This upgrades heuristic-only detection
+    // (S5-S7) to high-confidence for imported functions.
+    let isCrossFileResolved = false;
+    if (!knownAsync && !isDeclaredAsync && !hasPromiseReturn && !isKnownAPI && functionName) {
+      const targets = this.resolveCallTarget(context, node);
+      if (targets && targets.length > 0) {
+        for (const target of targets) {
+          // Check if the resolved target's summary indicates it's async
+          if (context.crossFileTaint) {
+            const summary = context.crossFileTaint.summaryStore.get(
+              target.canonicalId || target
+            );
+            if (summary) {
+              // Function summaries from SummaryBuilder record if the function is async
+              const summaryStr = JSON.stringify(summary);
+              if (/"isAsync"\s*:\s*true/.test(summaryStr) ||
+                  /"returnsPromise"\s*:\s*true/.test(summaryStr)) {
+                isCrossFileResolved = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // High confidence: any of S1-S4b
+    const isHighConfidence = isDeclaredAsync || hasPromiseReturn || isKnownAPI || isCrossFileResolved;
 
     // Skip heuristics if this is a known sync method ON AN OBJECT (e.g., crypto.update()).
     // Bare function calls (no objectName) must reach S5-S7 cross-file heuristics first.
@@ -1362,7 +1390,8 @@ export class MissingAwaitDetector extends BaseEngine {
     // S5 (naming heuristic) → medium (strong naming signal)
     // S6 (module import) alone → low (service modules often export sync utilities)
     // S6 + S5 combined → medium (two independent signals reinforce)
-    // S7 alone (used as async elsewhere) → low (weak: no scope checking)
+    // S6 + S7 combined → medium (two weak signals reinforce)
+    // S7 alone (used as async elsewhere) → low (same-file inconsistency is weak)
     // S8 (pattern match only) → low
     let confidence: 'high' | 'medium' | 'low';
     if (isHighConfidence) {
@@ -1378,13 +1407,31 @@ export class MissingAwaitDetector extends BaseEngine {
       confidence = 'low';
     }
 
+    // Severity ceiling for heuristic-only strategies (S5-S8):
+    // When confidence is medium or low (no S1-S4b confirmation), cap severity
+    // at 'warning'. This prevents false positives from tier escalation
+    // (try/catch context, return value used) when we only have naming/import
+    // evidence, not actual async proof from declarations or type annotations.
+    const isHeuristicOnly = !isHighConfidence;
+
+    let severity: 'error' | 'warning' | 'info';
     switch (tier) {
-      case 'critical': return { severity: 'error', confidence };
-      case 'high': return { severity: 'error', confidence };
-      case 'warning': return { severity: 'warning', confidence };
-      case 'info': return { severity: 'info', confidence: 'low' };
-      default: return { severity: 'warning', confidence };
+      case 'critical': severity = 'error'; break;
+      case 'high': severity = 'error'; break;
+      case 'warning': severity = 'warning'; break;
+      case 'info': severity = 'info'; break;
+      default: severity = 'warning'; break;
     }
+
+    if (isHeuristicOnly && severity === 'error') {
+      severity = 'warning';
+    }
+
+    if (severity === 'info') {
+      confidence = 'low';
+    }
+
+    return { severity, confidence };
   }
 
   private escalateTier(tier: string): string {

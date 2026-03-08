@@ -411,7 +411,7 @@ export class IDORDetector extends BaseEngine {
     const functionScope = this.findEnclosingFunction(node);
     if (functionScope) {
       for (const arg of node.arguments) {
-        if (!ts.isIdentifier(arg)) continue;
+        // Check all expression types, not just identifiers
         const taintResult = this.checkTaint(context, arg, functionScope);
         if (taintResult === null) continue; // taint unavailable, fall through to heuristic
         if (taintResult.tainted && taintResult.sanitized) {
@@ -426,6 +426,29 @@ export class IDORDetector extends BaseEngine {
           // Not user-controlled — lower confidence to heuristic-only
           confidence = 'low';
         }
+      }
+    }
+
+    // Cross-file taint: check if tainted data from another file flows into this DB call
+    const crossFileFlows = this.queryCrossFileTaint(context);
+    if (crossFileFlows && crossFileFlows.length > 0) {
+      // Look for flows that terminate at a sink in this file near this call
+      for (const flow of crossFileFlows) {
+        const sinkFile = flow.sinkHit?.filePath || flow.sink?.filePath;
+        const sinkLine = flow.sinkHit?.line || flow.sink?.line;
+        if (sinkFile === context.filePath && sinkLine !== undefined) {
+          // Cross-file tainted flow confirmed to reach this file — boost confidence
+          confidence = 'high';
+          break;
+        }
+      }
+    }
+
+    // Cross-file: resolve middleware functions to check if they perform auth
+    if (functionScope) {
+      const middlewareAuth = this.checkCrossFileMiddlewareAuth(node, context);
+      if (middlewareAuth) {
+        return null; // Middleware in another file handles authorization
       }
     }
 
@@ -693,6 +716,71 @@ export class IDORDetector extends BaseEngine {
   }
 
   /**
+   * Cross-file middleware auth check: resolve route middleware functions to their
+   * definitions in other files and check if they contain authorization logic.
+   */
+  private checkCrossFileMiddlewareAuth(node: ts.CallExpression, context: AnalysisContext): boolean {
+    if (!context.crossFileTaint) return false;
+
+    // Find the route registration call (e.g., app.get('/path', middleware1, middleware2, handler))
+    let routeCall: ts.CallExpression | null = null;
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (ts.isCallExpression(current) && ts.isPropertyAccessExpression(current.expression)) {
+        const method = current.expression.name.text.toLowerCase();
+        if (['get', 'post', 'put', 'delete', 'patch', 'all', 'use'].includes(method)) {
+          routeCall = current;
+          break;
+        }
+      }
+      if (ts.isFunctionDeclaration(current) || ts.isArrowFunction(current) ||
+          ts.isFunctionExpression(current) || ts.isMethodDeclaration(current)) {
+        break;
+      }
+      current = current.parent;
+    }
+    if (!routeCall || routeCall.arguments.length < 2) return false;
+
+    // Check middleware args (all args except the last one, which is the handler)
+    for (let i = 0; i < routeCall.arguments.length - 1; i++) {
+      const middlewareArg = routeCall.arguments[i];
+      // Skip string literals (route paths)
+      if (ts.isStringLiteral(middlewareArg)) continue;
+
+      if (ts.isIdentifier(middlewareArg)) {
+        // Resolve the middleware function cross-file
+        const targets = context.crossFileTaint.projectGraph.resolveCall(
+          routeCall, context.filePath
+        );
+        if (targets && targets.length > 0) {
+          for (const target of targets) {
+            const summary = context.crossFileTaint.summaryStore.get(target.canonicalId || target);
+            if (summary) {
+              // Check if the resolved function's summary contains auth-related transfers
+              const summaryStr = JSON.stringify(summary).toLowerCase();
+              if (/user\.id|userid|owner|authorize|permission|auth|acl|rbac/.test(summaryStr)) {
+                return true;
+              }
+            }
+          }
+        }
+
+        // Also check the middleware name against known patterns
+        const mwClass = IDORDetector.classifyMiddleware(middlewareArg.text);
+        if (mwClass === 'admin' || mwClass === 'ownership') return true;
+      }
+
+      // Handle call expressions: app.get('/path', requireAuth(), handler)
+      if (ts.isCallExpression(middlewareArg) && ts.isIdentifier(middlewareArg.expression)) {
+        const mwClass = IDORDetector.classifyMiddleware(middlewareArg.expression.text);
+        if (mwClass === 'admin' || mwClass === 'ownership') return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
    * Check if there's an authorization check in the enclosing function.
    * Single traversal calling focused sub-methods for efficiency.
    */
@@ -781,24 +869,149 @@ export class IDORDetector extends BaseEngine {
     });
   }
 
-  /** Text-based fallback: check call expression text for ownership columns or auth identity */
+  /** AST-based check: verify call expressions that use ownership columns or auth identity in
+   *  database/query contexts — not arbitrary calls like res.json() or console.log().
+   *
+   *  Instead of scanning raw text of any call, we:
+   *  1. Require the call to be a plausible DB/query/auth operation (allowlist)
+   *  2. Walk the call's arguments as AST nodes for ownership keys and auth identity
+   */
   private isOwnershipWhereText(node: ts.Node): boolean {
     if (!ts.isCallExpression(node)) return false;
 
-    // Skip response/utility calls to avoid false suppression
-    // res.json({ user: req.user.name }) is NOT an ownership check
     const expr = node.expression;
-    if (ts.isPropertyAccessExpression(expr)) {
-      const objName = this.getObjectName(expr.expression);
-      if (objName && /^(res|response|reply|ctx|console|logger|log)$/i.test(objName)) return false;
-      const methodName = expr.name.text;
-      if (/^(json|send|render|redirect|status|write|end|pipe|emit|dispatch|next|log|error|warn|info|debug|throw)$/i.test(methodName)) return false;
+    let callMethodName: string | null = null;
+    let callObjectName: string | null = null;
+
+    if (ts.isIdentifier(expr)) {
+      callMethodName = expr.text;
+    } else if (ts.isPropertyAccessExpression(expr)) {
+      callMethodName = expr.name.text;
+      callObjectName = this.getObjectName(expr.expression);
     }
 
-    const text = node.getText();
-    if (IDORDetector.OWNERSHIP_COLUMNS_REGEX.test(text)) return true;
-    if (IDORDetector.AUTH_IDENTITY_PATTERNS.some(p => p.test(text))) return true;
+    if (!callMethodName) return false;
+
+    // Only consider calls that are plausibly database/query/auth operations.
+    // This prevents res.json({ userId: x }), console.log(userId), etc. from
+    // falsely suppressing IDOR findings.
+    if (!this.isPlausibleAuthOrDbCall(callMethodName, callObjectName)) return false;
+
+    // Now check arguments via AST: look for ownership column identifiers
+    // or auth identity property access expressions
+    return this.callArgsContainOwnershipOrAuth(node);
+  }
+
+  /** Check if a call is plausibly a database query, WHERE clause, or authorization call —
+   *  not a response/logging/utility call. */
+  private isPlausibleAuthOrDbCall(methodName: string, objectName: string | null): boolean {
+    // Known non-DB methods — never treat as ownership checks
+    const nonDbMethods = new Set([
+      'json', 'send', 'render', 'redirect', 'status', 'write', 'end', 'pipe',
+      'emit', 'dispatch', 'next', 'log', 'error', 'warn', 'info', 'debug',
+      'throw', 'stringify', 'parse', 'toString', 'valueOf', 'console',
+      'push', 'pop', 'shift', 'unshift', 'splice', 'slice', 'map', 'filter',
+      'forEach', 'reduce', 'join', 'concat', 'includes', 'indexOf',
+      'assign', 'keys', 'values', 'entries', 'freeze', 'seal',
+      'resolve', 'reject', 'then', 'catch', 'finally',
+      'set', 'get', 'has', 'delete', 'clear', // Map/Set — too generic without object context
+    ]);
+    if (nonDbMethods.has(methodName)) return false;
+
+    // Known non-DB objects — responses, loggers, utilities
+    if (objectName && /^(res|response|reply|console|logger|log|JSON|Object|Array|Math|Promise|Set|Map|ctx)$/i.test(objectName)) {
+      return false;
+    }
+
+    // Positive match: DB/query methods, auth helpers, or calls on DB-like objects
+    const dbQueryMethods = /^(find|where|select|query|update|delete|create|insert|remove|save|merge|upsert|scope|filter|check|verify|assert|ensure|validate|authorize|can|has)/i;
+    if (dbQueryMethods.test(methodName)) return true;
+
+    // Positive match: call on a DB-like object
+    if (objectName && this.isDatabaseObject(methodName, objectName)) return true;
+
+    // Positive match: standalone auth helper calls (no object)
+    if (!objectName) {
+      const authCallPattern = /^(check|verify|assert|ensure|validate|require|can|has)(Access|Permission|Auth|Owner|Ownership|Role)/i;
+      if (authCallPattern.test(methodName)) return true;
+    }
+
     return false;
+  }
+
+  /** Walk call arguments as AST nodes to find ownership column identifiers or auth identity
+   *  property access patterns. Avoids getText() regex scanning. */
+  private callArgsContainOwnershipOrAuth(callNode: ts.CallExpression): boolean {
+    let found = false;
+
+    const walkNode = (node: ts.Node): void => {
+      if (found) return;
+
+      // Check identifiers against ownership columns: userId, tenantId, etc.
+      if (ts.isIdentifier(node)) {
+        if (IDORDetector.OWNERSHIP_COLUMNS.has(node.text)) {
+          found = true;
+          return;
+        }
+      }
+
+      // Check property access for auth identity: req.user.id, req.auth.sub, etc.
+      if (ts.isPropertyAccessExpression(node)) {
+        // Build a dotted path for the access chain (up to 4 levels)
+        const chain = this.getPropertyAccessChain(node);
+        if (chain && IDORDetector.AUTH_IDENTITY_PATTERNS.some(p => p.test(chain))) {
+          found = true;
+          return;
+        }
+      }
+
+      // Check shorthand properties: { userId } or property assignments: { userId: x }
+      if (ts.isShorthandPropertyAssignment(node)) {
+        if (IDORDetector.OWNERSHIP_COLUMNS.has(node.name.text)) {
+          found = true;
+          return;
+        }
+      }
+      if (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name)) {
+        if (IDORDetector.OWNERSHIP_COLUMNS.has(node.name.text)) {
+          found = true;
+          return;
+        }
+      }
+
+      ts.forEachChild(node, walkNode);
+    };
+
+    for (const arg of callNode.arguments) {
+      walkNode(arg);
+      if (found) return true;
+    }
+
+    return false;
+  }
+
+  /** Build a dotted property access chain string from a PropertyAccessExpression (up to 4 levels).
+   *  e.g., req.user.id → "req.user.id" */
+  private getPropertyAccessChain(node: ts.PropertyAccessExpression): string | null {
+    const parts: string[] = [];
+    let current: ts.Expression = node;
+    let depth = 0;
+
+    while (depth < 5) {
+      if (ts.isPropertyAccessExpression(current)) {
+        parts.unshift(current.name.text);
+        current = current.expression;
+        depth++;
+      } else if (ts.isIdentifier(current)) {
+        parts.unshift(current.text);
+        break;
+      } else {
+        // Can't resolve chain (e.g., call expression in the middle)
+        return null;
+      }
+    }
+
+    return parts.length >= 2 ? parts.join('.') : null;
   }
 
   /**

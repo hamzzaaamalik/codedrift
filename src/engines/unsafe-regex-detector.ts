@@ -597,6 +597,60 @@ export class UnsafeRegexDetector extends BaseEngine {
       return null;
     }
 
+    // ── Taint analysis: use data flow tracking if available ──
+    // This catches flows that heuristic regex matching misses:
+    //   const input = getSearchParam(); // cross-file taint source
+    //   const cleaned = input.trim();   // still tainted
+    //   new RegExp(cleaned);            // taint reaches RegExp sink
+    const functionScope = this.findFunctionScope(node);
+    if (functionScope) {
+      const taintResult = this.checkTaint(context, patternArg, functionScope);
+      if (taintResult !== null) {
+        if (taintResult.tainted && taintResult.sanitized) {
+          // Tainted but sanitized (e.g., passed through escapeRegExp) — safe
+          return null;
+        }
+        if (taintResult.tainted && !taintResult.sanitized) {
+          // Confirmed tainted and unsanitized via data flow — high confidence
+          return this.createIssue(
+            context, node,
+            'User-controlled input passed to RegExp constructor — regex injection and ReDoS vulnerability',
+            {
+              severity: 'error',
+              suggestion: 'Escape user input with string.replace(/[.*+?^${}()|[\\]\\\\]/g, \'\\\\$&\') before passing to RegExp, or use string methods (includes, startsWith, indexOf) instead.',
+              confidence: 'high',
+            }
+          );
+        }
+        // taintResult.tainted === false means data flow confirmed it's NOT user-controlled
+        // Fall through to heuristic checks but with reduced confidence
+      }
+    }
+
+    // ── Cross-file taint: check if any cross-file flow reaches a RegExp sink ──
+    const crossFileFlows = this.queryCrossFileTaint(context);
+    if (crossFileFlows && crossFileFlows.length > 0) {
+      for (const flow of crossFileFlows) {
+        const sinkFile = flow.sinkHit?.filePath || flow.sink?.filePath;
+        if (sinkFile === context.filePath) {
+          const sinkKind = flow.sinkHit?.kind || flow.sink?.kind || '';
+          if (/regex|regexp/i.test(sinkKind)) {
+            return this.createIssue(
+              context, node,
+              'Cross-file tainted input reaches RegExp constructor — regex injection vulnerability',
+              {
+                severity: 'error',
+                suggestion: 'Escape user input with string.replace(/[.*+?^${}()|[\\]\\\\]/g, \'\\\\$&\') before passing to RegExp, or use string methods (includes, startsWith, indexOf) instead.',
+                confidence: 'high',
+              }
+            );
+          }
+        }
+      }
+    }
+
+    // ── Heuristic fallback: pattern-based user input detection ──
+
     // Check if the argument is directly user input
     if (this.isUserInputExpression(patternArg)) {
       // Check for escaping on the expression (e.g., escapeRegExp(req.query.s))
@@ -637,6 +691,12 @@ export class UnsafeRegexDetector extends BaseEngine {
 
       // Check if it's a function parameter (could be user input)
       if (this.isFunctionParameter(patternArg)) {
+        // If taint analysis confirmed it's NOT tainted, skip parameter warning
+        if (functionScope) {
+          const paramTaint = this.checkTaint(context, patternArg, functionScope);
+          if (paramTaint !== null && !paramTaint.tainted) return null;
+        }
+
         return this.createIssue(
           context, node,
           'Function parameter used in RegExp constructor — potential regex injection if parameter contains user input',
@@ -1622,6 +1682,19 @@ export class UnsafeRegexDetector extends BaseEngine {
   }
 
   // ──────────── Utility ────────────
+
+  /**
+   * Find enclosing function scope for taint analysis.
+   */
+  private findFunctionScope(node: ts.Node): ts.Node | null {
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (this.isFunctionLike(current)) return current;
+      if (ts.isSourceFile(current)) return current;
+      current = current.parent;
+    }
+    return null;
+  }
 
   /**
    * Check if node is function-like
