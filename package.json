@@ -1,6 +1,6 @@
 {
   "name": "codedrift",
-  "version": "1.2.11",
+  "version": "1.2.12",
   "description": "Guardrails for AI-assisted development - Detects IDOR, missing input validation, hardcoded secrets, and other critical bugs in AI-generated code",
   "type": "module",
   "main": "dist/cli.js",
@@ -20,7 +20,7 @@
   "bugs": {
     "url": "https://github.com/hamzzaaamalik/codedrift/issues"
   },
-  "homepage": "https://github.com/hamzzaaamalik/codedrift#readme",
+  "homepage": "https://codedrift.dev",
   "keywords": [
     "ai-guardrails",
     "github-copilot",

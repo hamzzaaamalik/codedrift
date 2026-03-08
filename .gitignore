@@ -43,3 +43,6 @@ Thumbs.db
 
 # Planning/spec documents
 *.pdf
+
+# Website (separate deployment)
+website/
